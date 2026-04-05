@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from mr_lang.exceptions import PluginError
@@ -10,51 +11,25 @@ from mr_lang.exceptions import PluginError
 # Templates
 # ---------------------------------------------------------------------------
 
-_IDENTITY_BASIC = """\
-# Identity
-
-- Name: {display_name}
-- Role: AI Assistant
-- Version: 0.1.0
-"""
-
-_IDENTITY_TELEGRAM = """\
-# Identity
-
-- Name: {display_name}
-- Role: Telegram Bot Assistant
-- Version: 0.1.0
-- Platform: Telegram
-"""
-
-_IDENTITY_TEACHING = """\
-# Identity
-
-- Name: {display_name}
-- Role: Teaching Assistant
-- Version: 0.1.0
-- Specialization: Education
-"""
-
-_SOUL = """\
+_SOUL_DEFAULT = """\
 # Personality
 
 Be helpful, clear, and concise.
 """
 
-_USER = """\
+_USER_DEFAULT = """\
 # User Profile
 
 Adapt to the user's needs and preferences.
 """
 
-_TOOLS_DOC = """\
+_TOOLS_DOC_DEFAULT = """\
 # Tools
 
 This document describes the tools available to the agent.
 """
 
-_AGENTS_DOC = """\
+_AGENTS_DOC_DEFAULT = """\
 # Agents
 
 Describe sub-agents or collaboration patterns here.
@@ -114,16 +89,20 @@ def _manifest_toml(
     module: str,
     description: str,
     *,
+    author: str = "",
     extra_deps: list[str] | None = None,
+    mcp_servers: list[str] | None = None,
 ) -> str:
     deps = extra_deps or []
     deps_str = ", ".join(f'"{d}"' for d in deps)
+    servers = mcp_servers or []
+    servers_str = ", ".join(f'"{s}"' for s in servers)
     return f"""\
 [plugin]
 name = "{name}"
 version = "0.1.0"
 description = "{description}"
-author = ""
+author = "{author}"
 
 [plugin.paths]
 workspace = "./workspace"
@@ -131,7 +110,7 @@ skills = "./src/{module}/skills"
 tools_module = "{module}.tools"
 
 [plugin.mcp]
-servers = []
+servers = [{servers_str}]
 
 [plugin.cli]
 module = ""
@@ -189,15 +168,6 @@ from __future__ import annotations
 TEMPLATES = {"basic", "telegram-bot", "teaching-assistant"}
 
 
-def _get_identity(template: str, display_name: str) -> str:
-    templates = {
-        "basic": _IDENTITY_BASIC,
-        "telegram-bot": _IDENTITY_TELEGRAM,
-        "teaching-assistant": _IDENTITY_TEACHING,
-    }
-    return templates.get(template, _IDENTITY_BASIC).format(display_name=display_name)
-
-
 def _extra_deps(template: str) -> list[str]:
     if template == "telegram-bot":
         return ["python-telegram-bot>=21"]
@@ -209,11 +179,30 @@ def _extra_deps(template: str) -> list[str]:
 # ---------------------------------------------------------------------------
 
 
+@dataclass
+class WizardConfig:
+    """All parameters the wizard can collect."""
+
+    name: str = ""
+    template: str = "basic"
+    description: str = ""
+    author: str = ""
+    agent_name: str = ""
+    agent_role: str = ""
+    personality: str = ""
+    language: str = "English"
+    provider: str = "ollama"
+    model: str = "llama3"
+    mcp_servers: list[str] = field(default_factory=list)
+    enable_telegram: bool = False
+
+
 def scaffold_project(
     name: str,
     path: Path | None = None,
     template: str = "basic",
     description: str = "",
+    wizard: WizardConfig | None = None,
 ) -> Path:
     """Create a new plugin project directory structure.
 
@@ -222,6 +211,7 @@ def scaffold_project(
         path: Parent directory in which to create the project. Defaults to cwd.
         template: One of 'basic', 'telegram-bot', 'teaching-assistant'.
         description: Short project description.
+        wizard: Optional wizard config with additional parameters.
 
     Returns:
         Path to the created project root.
@@ -239,6 +229,11 @@ def scaffold_project(
     module = name.replace("-", "_")
     display_name = name.replace("-", " ").title()
     desc = description or f"A mr_lang plugin: {display_name}"
+    wiz = wizard or WizardConfig()
+
+    # Merge template with wizard overrides
+    if wiz.enable_telegram and template != "telegram-bot":
+        template = "telegram-bot"
 
     # Create directory tree
     src = project_root / "src" / module
@@ -252,7 +247,14 @@ def scaffold_project(
 
     # Top-level files
     (project_root / "mr_lang_plugin.toml").write_text(
-        _manifest_toml(name, module, desc, extra_deps=_extra_deps(template)),
+        _manifest_toml(
+            name,
+            module,
+            desc,
+            author=wiz.author,
+            extra_deps=_extra_deps(template),
+            mcp_servers=wiz.mcp_servers,
+        ),
         encoding="utf-8",
     )
     (project_root / "pyproject.toml").write_text(
@@ -265,16 +267,76 @@ def scaffold_project(
     (tools_dir / "__init__.py").write_text(_tools_init(), encoding="utf-8")
     (skills_dir / "example.SKILL.md").write_text(_EXAMPLE_SKILL, encoding="utf-8")
 
-    # Workspace files
-    (ws / "IDENTITY.md").write_text(
-        _get_identity(template, display_name), encoding="utf-8"
-    )
-    (ws / "SOUL.md").write_text(_SOUL, encoding="utf-8")
-    (ws / "USER.md").write_text(_USER, encoding="utf-8")
-    (ws / "TOOLS.md").write_text(_TOOLS_DOC, encoding="utf-8")
-    (ws / "AGENTS.md").write_text(_AGENTS_DOC, encoding="utf-8")
+    # Workspace files — use wizard values if provided, else defaults
+    agent_display = wiz.agent_name or display_name
+    identity = _build_identity(template, agent_display, wiz)
+    (ws / "IDENTITY.md").write_text(identity, encoding="utf-8")
+
+    soul = _build_soul(wiz)
+    (ws / "SOUL.md").write_text(soul, encoding="utf-8")
+    (ws / "USER.md").write_text(_USER_DEFAULT, encoding="utf-8")
+    (ws / "TOOLS.md").write_text(_TOOLS_DOC_DEFAULT, encoding="utf-8")
+
+    agents_doc = _build_agents_doc(wiz)
+    (ws / "AGENTS.md").write_text(agents_doc, encoding="utf-8")
+
+    # .env.example for easy onboarding
+    env_lines = ["# Environment variables for this plugin", ""]
+    if wiz.enable_telegram or template == "telegram-bot":
+        env_lines.append("MR_LANG_TELEGRAM_BOT_TOKEN=")
+    if wiz.provider == "openai":
+        env_lines.append("OPENAI_API_KEY=")
+    elif wiz.provider == "anthropic":
+        env_lines.append("ANTHROPIC_API_KEY=")
+    env_lines.append("")
+    (project_root / ".env.example").write_text("\n".join(env_lines), encoding="utf-8")
 
     # Tests
     (tests / "__init__.py").write_text("", encoding="utf-8")
 
     return project_root
+
+
+# ---------------------------------------------------------------------------
+# Wizard-aware content builders
+# ---------------------------------------------------------------------------
+
+
+def _build_identity(template: str, display_name: str, wiz: WizardConfig) -> str:
+    role = wiz.agent_role or {
+        "basic": "AI Assistant",
+        "telegram-bot": "Telegram Bot Assistant",
+        "teaching-assistant": "Teaching Assistant",
+    }.get(template, "AI Assistant")
+
+    lines = [
+        "# Identity",
+        "",
+        f"- **Name**: {display_name}",
+        f"- **Role**: {role}",
+        f"- **Language**: {wiz.language}",
+        "- **Version**: 0.1.0",
+    ]
+    if template == "telegram-bot":
+        lines.append("- **Platform**: Telegram")
+    if template == "teaching-assistant":
+        lines.append("- **Specialization**: Education")
+    return "\n".join(lines) + "\n"
+
+
+def _build_soul(wiz: WizardConfig) -> str:
+    if wiz.personality:
+        return f"# Personality\n\n{wiz.personality}\n"
+    return _SOUL_DEFAULT
+
+
+def _build_agents_doc(wiz: WizardConfig) -> str:
+    lines = [
+        "# Agent Configuration",
+        "",
+        "## Primary Agent",
+        f"- **Provider**: {wiz.provider}",
+        f"- **Model**: {wiz.model}",
+        "- **Temperature**: 0.7",
+    ]
+    return "\n".join(lines) + "\n"

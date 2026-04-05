@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from mr_lang.exceptions import PluginError
-from mr_lang.plugins.scaffold import scaffold_project
+from mr_lang.plugins.scaffold import WizardConfig, scaffold_project
 
 
 class TestScaffoldProject:
@@ -68,3 +68,51 @@ class TestScaffoldProject:
         )
         content = (root / "mr_lang_plugin.toml").read_text()
         assert "Custom description" in content
+
+    def test_wizard_config_customizes_workspace(self, tmp_path: Path) -> None:
+        wiz = WizardConfig(
+            agent_name="Dr. Brain",
+            agent_role="Science Tutor",
+            language="German",
+            personality="Enthusiastic and patient.",
+            provider="anthropic",
+            model="claude-sonnet-4-6",
+            author="Ali",
+            mcp_servers=["http://localhost:9000/sse"],
+            enable_telegram=True,
+        )
+        root = scaffold_project(
+            "brain-bot", path=tmp_path, template="basic", description="Test", wizard=wiz
+        )
+
+        identity = (root / "workspace" / "IDENTITY.md").read_text()
+        assert "Dr. Brain" in identity
+        assert "Science Tutor" in identity
+        assert "German" in identity
+
+        soul = (root / "workspace" / "SOUL.md").read_text()
+        assert "Enthusiastic and patient" in soul
+
+        agents = (root / "workspace" / "AGENTS.md").read_text()
+        assert "anthropic" in agents
+        assert "claude-sonnet-4-6" in agents
+
+        manifest = (root / "mr_lang_plugin.toml").read_text()
+        assert "Ali" in manifest
+        assert "http://localhost:9000/sse" in manifest
+
+        # Telegram enabled should add .env.example with bot token
+        env = (root / ".env.example").read_text()
+        assert "TELEGRAM_BOT_TOKEN" in env
+
+    def test_wizard_defaults_produce_valid_project(self, tmp_path: Path) -> None:
+        """A completely default WizardConfig should scaffold without errors."""
+        wiz = WizardConfig()
+        root = scaffold_project("default-wiz", path=tmp_path, wizard=wiz)
+
+        from mr_lang.plugins.loader import PluginLoader
+
+        m = PluginLoader.load_from_manifest(root / "mr_lang_plugin.toml")
+        assert m.name == "default-wiz"
+        assert (root / "workspace" / "IDENTITY.md").is_file()
+        assert (root / ".env.example").is_file()
