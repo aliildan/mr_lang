@@ -1,14 +1,18 @@
-"""Interactive chat REPL."""
+"""CLI entrypoint for the Telegram bot adapter."""
 
 from __future__ import annotations
 
-from rich.console import Console
-from rich.markdown import Markdown
+import asyncio
+import signal
 
+from rich.console import Console
+
+from mr_lang.adapters.telegram import TelegramBot
 from mr_lang.config import MrLangConfig
 from mr_lang.core.graph import build_agent_graph
 from mr_lang.core.registry import ToolRegistry
 from mr_lang.core.runner import AgentRunner
+from mr_lang.exceptions import AdapterError
 from mr_lang.middleware.logging_mw import LoggingMiddleware
 from mr_lang.providers.base import get_chat_model
 from mr_lang.tools.builtin import list_files, read_file, run_shell, write_file
@@ -18,12 +22,12 @@ from mr_lang.workspace.loader import load_workspace
 console = Console(stderr=True)
 
 
-async def run_chat(
+async def run_telegram(
     workspace: str | None = None,
     provider: str = "ollama",
     model: str = "llama3",
 ) -> None:
-    """Run the interactive chat loop."""
+    """Wire up workspace/provider/graph/runner and start the Telegram bot."""
     config = MrLangConfig()
 
     # Load workspace if provided
@@ -55,35 +59,19 @@ async def run_chat(
     )
     runner = AgentRunner(graph)
 
-    # Chat loop
-    thread_id = "cli-session"
-    console.print("[dim]Type 'quit' or 'exit' to end. 'clear' to reset.[/dim]\n")
+    # Resolve token
+    token = config.telegram_bot_token
+    if not token:
+        raise AdapterError(
+            "Telegram bot token not configured. "
+            "Set MR_LANG_TELEGRAM_BOT_TOKEN env var or telegram_bot_token in config."
+        )
 
-    while True:
-        try:
-            user_input = console.input("[bold cyan]you>[/bold cyan] ")
-        except (EOFError, KeyboardInterrupt):
-            console.print("\n[dim]Goodbye![/dim]")
-            break
+    bot = TelegramBot(runner=runner, token=token)
 
-        if not user_input.strip():
-            continue
-        if user_input.strip().lower() in ("quit", "exit"):
-            console.print("[dim]Goodbye![/dim]")
-            break
-        if user_input.strip().lower() == "clear":
-            thread_id = f"cli-session-{id(object())}"
-            console.print("[dim]Conversation cleared.[/dim]")
-            continue
+    # Handle graceful shutdown via signals
+    loop = asyncio.get_running_loop()
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        loop.add_signal_handler(sig, lambda: asyncio.create_task(bot.stop()))
 
-        try:
-            result = await runner.run(message=user_input, thread_id=thread_id)
-            messages = result.get("messages", [])
-            if messages:
-                last = messages[-1]
-                content = last.content if hasattr(last, "content") else str(last)
-                console.print()
-                console.print(Markdown(content))
-                console.print()
-        except Exception as e:
-            console.print(f"[red]Error:[/red] {e}")
+    await bot.start()

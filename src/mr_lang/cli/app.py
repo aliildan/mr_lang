@@ -69,6 +69,44 @@ def tools(
 
 
 @app.command()
+def telegram(
+    workspace: str = typer.Option(
+        None, "--workspace", "-w", help="Path to workspace directory"
+    ),
+    provider: str = typer.Option("ollama", "--provider", "-p", help="Model provider"),
+    model: str = typer.Option("llama3", "--model", "-m", help="Model name"),
+) -> None:
+    """Start the Telegram bot adapter."""
+    import asyncio
+
+    from mr_lang.cli.telegram_cmd import run_telegram
+
+    asyncio.run(run_telegram(workspace=workspace, provider=provider, model=model))
+
+
+@app.command()
+def serve(
+    workspace: str = typer.Option(
+        None, "--workspace", "-w", help="Path to workspace directory"
+    ),
+    provider: str = typer.Option("ollama", "--provider", "-p", help="Model provider"),
+    model: str = typer.Option("llama3", "--model", "-m", help="Model name"),
+    host: str = typer.Option(None, "--host", help="Server host (default from config)"),
+    port: int = typer.Option(None, "--port", help="Server port (default from config)"),
+) -> None:
+    """Start the MCP server adapter."""
+    import asyncio
+
+    from mr_lang.cli.serve_cmd import run_serve
+
+    asyncio.run(
+        run_serve(
+            workspace=workspace, provider=provider, model=model, host=host, port=port
+        )
+    )
+
+
+@app.command()
 def config() -> None:
     """Show current configuration."""
     from rich.console import Console

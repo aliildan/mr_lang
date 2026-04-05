@@ -1,10 +1,10 @@
-"""Interactive chat REPL."""
+"""CLI entrypoint for the MCP server adapter."""
 
 from __future__ import annotations
 
 from rich.console import Console
-from rich.markdown import Markdown
 
+from mr_lang.adapters.mcp import McpServer
 from mr_lang.config import MrLangConfig
 from mr_lang.core.graph import build_agent_graph
 from mr_lang.core.registry import ToolRegistry
@@ -18,12 +18,14 @@ from mr_lang.workspace.loader import load_workspace
 console = Console(stderr=True)
 
 
-async def run_chat(
+async def run_serve(
     workspace: str | None = None,
     provider: str = "ollama",
     model: str = "llama3",
+    host: str | None = None,
+    port: int | None = None,
 ) -> None:
-    """Run the interactive chat loop."""
+    """Wire up workspace/provider/graph/runner and start the MCP server."""
     config = MrLangConfig()
 
     # Load workspace if provided
@@ -55,35 +57,10 @@ async def run_chat(
     )
     runner = AgentRunner(graph)
 
-    # Chat loop
-    thread_id = "cli-session"
-    console.print("[dim]Type 'quit' or 'exit' to end. 'clear' to reset.[/dim]\n")
+    # Resolve host/port
+    host = host or config.host
+    port = port or config.port
 
-    while True:
-        try:
-            user_input = console.input("[bold cyan]you>[/bold cyan] ")
-        except (EOFError, KeyboardInterrupt):
-            console.print("\n[dim]Goodbye![/dim]")
-            break
-
-        if not user_input.strip():
-            continue
-        if user_input.strip().lower() in ("quit", "exit"):
-            console.print("[dim]Goodbye![/dim]")
-            break
-        if user_input.strip().lower() == "clear":
-            thread_id = f"cli-session-{id(object())}"
-            console.print("[dim]Conversation cleared.[/dim]")
-            continue
-
-        try:
-            result = await runner.run(message=user_input, thread_id=thread_id)
-            messages = result.get("messages", [])
-            if messages:
-                last = messages[-1]
-                content = last.content if hasattr(last, "content") else str(last)
-                console.print()
-                console.print(Markdown(content))
-                console.print()
-        except Exception as e:
-            console.print(f"[red]Error:[/red] {e}")
+    console.print(f"[green]Starting MCP server on[/green] {host}:{port}")
+    server = McpServer(runner=runner, registry=registry)
+    server.run(host=host, port=port)

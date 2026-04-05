@@ -1,1 +1,7 @@
-"""Telegram bot adapter — to be implemented."""
+"""Telegram bot adapter for mr_lang."""
+
+from __future__ import annotations
+
+from mr_lang.adapters.telegram.bot import TelegramBot
+
+__all__ = ["TelegramBot"]
