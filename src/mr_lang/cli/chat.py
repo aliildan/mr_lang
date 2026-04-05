@@ -38,7 +38,10 @@ async def run_chat(
     # Set up model
     provider = provider or config.default_provider
     model = model or config.default_model
-    chat_model = get_chat_model(provider, model)
+    model_kwargs: dict = {}
+    if provider == "ollama" and config.ollama_base_url:
+        model_kwargs["base_url"] = config.ollama_base_url
+    chat_model = get_chat_model(provider, model, **model_kwargs)
     console.print(f"[green]Model:[/green] {provider}/{model}")
 
     # Set up tools

@@ -39,7 +39,7 @@ class TestScaffoldProject:
     def test_telegram_template(self, tmp_path: Path) -> None:
         root = scaffold_project("tg-bot", path=tmp_path, template="telegram-bot")
         identity = (root / "workspace" / "IDENTITY.md").read_text()
-        assert "Telegram" in identity
+        assert "Tg Bot" in identity  # display name from project name
 
         from mr_lang.plugins.loader import PluginLoader
 
@@ -51,7 +51,7 @@ class TestScaffoldProject:
             "teach-assist", path=tmp_path, template="teaching-assistant"
         )
         identity = (root / "workspace" / "IDENTITY.md").read_text()
-        assert "Teaching" in identity
+        assert "Teach Assist" in identity  # display name derived from project name
 
     def test_unknown_template_raises(self, tmp_path: Path) -> None:
         with pytest.raises(PluginError, match="Unknown template"):

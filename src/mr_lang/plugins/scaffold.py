@@ -192,7 +192,8 @@ class WizardConfig:
     personality: str = ""
     language: str = "English"
     provider: str = "ollama"
-    model: str = "llama3"
+    model: str = ""
+    ollama_base_url: str = ""
     mcp_servers: list[str] = field(default_factory=list)
     enable_telegram: bool = False
 
@@ -269,7 +270,7 @@ def scaffold_project(
 
     # Workspace files — use wizard values if provided, else defaults
     agent_display = wiz.agent_name or display_name
-    identity = _build_identity(template, agent_display, wiz)
+    identity = _build_identity(agent_display, wiz)
     (ws / "IDENTITY.md").write_text(identity, encoding="utf-8")
 
     soul = _build_soul(wiz)
@@ -284,6 +285,10 @@ def scaffold_project(
     env_lines = ["# Environment variables for this plugin", ""]
     if wiz.enable_telegram or template == "telegram-bot":
         env_lines.append("MR_LANG_TELEGRAM_BOT_TOKEN=")
+    if wiz.provider == "ollama" and wiz.ollama_base_url:
+        env_lines.append(f"OLLAMA_BASE_URL={wiz.ollama_base_url}")
+    elif wiz.provider == "ollama":
+        env_lines.append("# OLLAMA_BASE_URL=http://127.0.0.1:11434")
     if wiz.provider == "openai":
         env_lines.append("OPENAI_API_KEY=")
     elif wiz.provider == "anthropic":
@@ -302,25 +307,16 @@ def scaffold_project(
 # ---------------------------------------------------------------------------
 
 
-def _build_identity(template: str, display_name: str, wiz: WizardConfig) -> str:
-    role = wiz.agent_role or {
-        "basic": "AI Assistant",
-        "telegram-bot": "Telegram Bot Assistant",
-        "teaching-assistant": "Teaching Assistant",
-    }.get(template, "AI Assistant")
-
+def _build_identity(display_name: str, wiz: WizardConfig) -> str:
     lines = [
         "# Identity",
         "",
         f"- **Name**: {display_name}",
-        f"- **Role**: {role}",
-        f"- **Language**: {wiz.language}",
-        "- **Version**: 0.1.0",
     ]
-    if template == "telegram-bot":
-        lines.append("- **Platform**: Telegram")
-    if template == "teaching-assistant":
-        lines.append("- **Specialization**: Education")
+    if wiz.agent_role:
+        lines.append(f"- **Role**: {wiz.agent_role}")
+    lines.append(f"- **Language**: {wiz.language}")
+    lines.append("- **Version**: 0.1.0")
     return "\n".join(lines) + "\n"
 
 
@@ -336,7 +332,10 @@ def _build_agents_doc(wiz: WizardConfig) -> str:
         "",
         "## Primary Agent",
         f"- **Provider**: {wiz.provider}",
-        f"- **Model**: {wiz.model}",
-        "- **Temperature**: 0.7",
     ]
+    if wiz.model:
+        lines.append(f"- **Model**: {wiz.model}")
+    if wiz.ollama_base_url:
+        lines.append(f"- **Base URL**: {wiz.ollama_base_url}")
+    lines.append("- **Temperature**: 0.7")
     return "\n".join(lines) + "\n"

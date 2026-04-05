@@ -27,6 +27,10 @@ class MrLangConfig(BaseSettings):
     # Model defaults
     default_provider: str = Field(default="ollama", description="Default model provider")
     default_model: str = Field(default="llama3", description="Default model name")
+    ollama_base_url: str | None = Field(
+        default=None,
+        description="Ollama API base URL (for local or cloud instances)",
+    )
     temperature: float = Field(default=0.7, ge=0.0, le=2.0)
 
     # Memory

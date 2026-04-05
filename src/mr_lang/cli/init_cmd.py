@@ -20,24 +20,9 @@ console = Console(stderr=True)
 # ---------------------------------------------------------------------------
 
 _PROVIDERS = {
-    "ollama": {
-        "label": "Ollama (local)",
-        "models": ["llama3", "mistral", "gemma2", "qwen2.5", "phi3"],
-    },
-    "openai": {
-        "label": "OpenAI",
-        "models": ["gpt-4o", "gpt-4o-mini", "o3-mini"],
-    },
-    "anthropic": {
-        "label": "Anthropic",
-        "models": ["claude-sonnet-4-6", "claude-haiku-4-5-20251001"],
-    },
-}
-
-_TEMPLATE_INFO = {
-    "basic": "General-purpose agent — good starting point",
-    "telegram-bot": "Telegram chatbot with message handling",
-    "teaching-assistant": "Educational tutor with structured learning",
+    "ollama": {"label": "Ollama (local or cloud)"},
+    "openai": {"label": "OpenAI"},
+    "anthropic": {"label": "Anthropic"},
 }
 
 # ---------------------------------------------------------------------------
@@ -116,16 +101,15 @@ def _run_wizard(initial_name: str | None, path: str) -> None:
 
     # ── Step 2: Template ──────────────────────────────────────────────
     _step_header(2, "Template")
+    choices = sorted(TEMPLATES)
     table = Table(show_header=False, box=None, padding=(0, 2))
     table.add_column("Key", style="bold cyan", width=4)
     table.add_column("Template")
-    table.add_column("Description", style="dim")
-    for i, tmpl in enumerate(sorted(TEMPLATES), 1):
-        table.add_row(f"  {i}", tmpl, _TEMPLATE_INFO.get(tmpl, ""))
+    for i, tmpl in enumerate(choices, 1):
+        table.add_row(f"  {i}", tmpl)
     console.print(table)
 
     raw = Prompt.ask("  Select template", default="1").strip()
-    choices = sorted(TEMPLATES)
     if raw.isdigit() and 1 <= int(raw) <= len(choices):
         wiz.template = choices[int(raw) - 1]
     elif raw in TEMPLATES:
@@ -161,11 +145,9 @@ def _run_wizard(initial_name: str | None, path: str) -> None:
     ptable = Table(show_header=False, box=None, padding=(0, 2))
     ptable.add_column("Key", style="bold cyan", width=4)
     ptable.add_column("Provider")
-    ptable.add_column("Example models", style="dim")
     provider_keys = list(_PROVIDERS.keys())
     for i, pk in enumerate(provider_keys, 1):
-        info = _PROVIDERS[pk]
-        ptable.add_row(f"  {i}", info["label"], ", ".join(info["models"][:3]))
+        ptable.add_row(f"  {i}", _PROVIDERS[pk]["label"])
     console.print(ptable)
 
     raw_p = Prompt.ask("  Select provider", default="1").strip()
@@ -176,8 +158,16 @@ def _run_wizard(initial_name: str | None, path: str) -> None:
     else:
         wiz.provider = "ollama"
 
-    default_model = _PROVIDERS[wiz.provider]["models"][0]
-    wiz.model = Prompt.ask("  Model name", default=default_model)
+    wiz.model = Prompt.ask(
+        "  Model name [dim](e.g. llama3, gpt-4o, claude-sonnet-4-6)[/dim]",
+        default="",
+    )
+
+    if wiz.provider == "ollama":
+        wiz.ollama_base_url = Prompt.ask(
+            "  Ollama base URL [dim](leave empty for local default)[/dim]",
+            default="",
+        )
 
     # ── Step 6: Adapters & MCP ────────────────────────────────────────
     _step_header(6, "Integrations")
@@ -203,9 +193,17 @@ def _run_wizard(initial_name: str | None, path: str) -> None:
     summary.add_row("Template", wiz.template)
     summary.add_row("Description", wiz.description)
     summary.add_row("Author", wiz.author or "[dim]not set[/dim]")
-    summary.add_row("Agent", f"{wiz.agent_name} ({wiz.agent_role or wiz.template})")
+    agent_desc = wiz.agent_name
+    if wiz.agent_role:
+        agent_desc += f" ({wiz.agent_role})"
+    summary.add_row("Agent", agent_desc)
     summary.add_row("Language", wiz.language)
-    summary.add_row("Provider", f"{wiz.provider}/{wiz.model}")
+    provider_desc = wiz.provider
+    if wiz.model:
+        provider_desc += f"/{wiz.model}"
+    if wiz.ollama_base_url:
+        provider_desc += f" @ {wiz.ollama_base_url}"
+    summary.add_row("Provider", provider_desc)
     summary.add_row("Telegram", "yes" if wiz.enable_telegram else "no")
     summary.add_row("MCP servers", str(len(wiz.mcp_servers)))
     console.print(summary)
