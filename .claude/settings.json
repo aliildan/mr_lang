@@ -1,0 +1,11 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "command": "file=\"$TOOL_INPUT_FILE_PATH\"; if [[ \"$file\" == *.py ]]; then cd /Users/aildan/Projects/mr_lang && .venv/bin/python -m ruff format --quiet \"$file\" 2>/dev/null; .venv/bin/python -m ruff check --fix --quiet \"$file\" 2>/dev/null; fi; true",
+        "description": "Auto-format Python files with ruff after edit"
+      }
+    ]
+  }
+}
