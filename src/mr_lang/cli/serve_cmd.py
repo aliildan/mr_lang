@@ -47,6 +47,15 @@ async def run_serve(
     for t in builtin_tools:
         registry.register(t)
 
+    # Discover and activate plugins (tools, skills, MCP servers)
+    from mr_lang.core.registry import SkillRegistry
+    from mr_lang.plugins.integrations import load_plugins_into_registries
+
+    skill_registry = SkillRegistry()
+    await load_plugins_into_registries(registry, skill_registry)
+    if registry.names():
+        console.print(f"[green]Tools:[/green] {', '.join(registry.names())}")
+
     # Build graph with middleware
     middleware = [LoggingMiddleware()]
     graph = build_agent_graph(

@@ -143,7 +143,7 @@ class PluginLoader:
         from mr_lang.skills.loader import load_skills_dir
         from mr_lang.tools.discovery import discover_tools_from_module
 
-        # Tools
+        # Tools — warn instead of crash if module is empty or not installed yet
         if manifest.tools_module:
             try:
                 discover_tools_from_module(tool_registry, manifest.tools_module)
@@ -152,20 +152,53 @@ class PluginLoader:
                     manifest.tools_module,
                     manifest.name,
                 )
+            except ImportError:
+                logger.warning(
+                    "Plugin '%s': tools_module '%s' not found — "
+                    "install the plugin or add tools later.",
+                    manifest.name,
+                    manifest.tools_module,
+                )
             except Exception as exc:
-                raise PluginError(
-                    f"Failed to load tools for plugin '{manifest.name}': {exc}"
-                ) from exc
+                logger.warning(
+                    "Plugin '%s': failed to load tools from '%s': %s",
+                    manifest.name,
+                    manifest.tools_module,
+                    exc,
+                )
 
-        # Skills
+        # Skills — warn if skills directory is declared but missing
         skills_path = manifest.resolve_skills()
-        if skills_path and skills_path.is_dir():
+        if manifest.skills_dir and (not skills_path or not skills_path.is_dir()):
+            logger.warning(
+                "Plugin '%s': skills_dir '%s' not found — add skills later.",
+                manifest.name,
+                manifest.skills_dir,
+            )
+        elif skills_path and skills_path.is_dir():
             for skill in load_skills_dir(skills_path):
                 skill_registry.register(skill)
             logger.info(
                 "Loaded skills from %s for plugin %s",
                 skills_path,
                 manifest.name,
+            )
+
+        # Workspace — warn if workspace directory is declared but missing
+        ws_path = manifest.resolve_workspace()
+        if manifest.workspace_dir and (not ws_path or not ws_path.is_dir()):
+            logger.warning(
+                "Plugin '%s': workspace_dir '%s' not found — add workspace files later.",
+                manifest.name,
+                manifest.workspace_dir,
+            )
+
+        # MCP servers — warn if configured but not reachable (validated at runtime)
+        if manifest.mcp_servers:
+            logger.info(
+                "Plugin '%s' declares %d MCP server(s) — will connect at runtime.",
+                manifest.name,
+                len(manifest.mcp_servers),
             )
 
     # ------------------------------------------------------------------

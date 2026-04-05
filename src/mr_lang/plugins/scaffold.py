@@ -165,7 +165,17 @@ def _tools_init() -> str:
     return '''\
 """Custom tools for this plugin.
 
-Define LangChain BaseTool instances here. They will be auto-discovered.
+Define LangChain @tool functions here. They will be auto-discovered
+when the plugin is activated. Example:
+
+    from langchain_core.tools import tool
+
+    @tool
+    def my_tool(query: str) -> str:
+        \"""Describe what this tool does — this is visible to the LLM.\"""
+        return f"Result for {query}"
+
+No tools defined yet — this is fine, you'll just see a warning until you add some.
 """
 
 from __future__ import annotations
