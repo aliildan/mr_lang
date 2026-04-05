@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import importlib
-import sys
 from importlib.metadata import entry_points
 
 from langchain_core.tools import BaseTool
@@ -20,10 +19,7 @@ def discover_tools_from_entry_points(
     Each entry point should point to a module containing BaseTool instances
     as module-level attributes.
     """
-    if sys.version_info >= (3, 12):
-        eps = entry_points(group=group)
-    else:
-        eps = entry_points().get(group, [])
+    eps = entry_points(group=group)
 
     for ep in eps:
         module = ep.load()

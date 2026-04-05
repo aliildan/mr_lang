@@ -10,6 +10,8 @@ from mr_lang.core.graph import build_agent_graph
 from mr_lang.core.registry import ToolRegistry
 from mr_lang.core.runner import AgentRunner
 from mr_lang.middleware.logging_mw import LoggingMiddleware
+from mr_lang.observability.collector import EventCollector
+from mr_lang.observability.middleware import ObservabilityMiddleware
 from mr_lang.providers.base import get_chat_model
 from mr_lang.tools.builtin import list_files, read_file, run_shell, write_file
 from mr_lang.workspace.builder import build_system_prompt
@@ -46,7 +48,10 @@ async def run_chat(
         registry.register(t)
 
     # Build graph with middleware
-    middleware = [LoggingMiddleware()]
+    thread_id = "cli-session"
+    collector = EventCollector()
+    obs_mw = ObservabilityMiddleware(collector=collector, session_id=thread_id)
+    middleware = [LoggingMiddleware(), obs_mw]
     graph = build_agent_graph(
         model=chat_model,
         tools=registry.list(),
@@ -54,9 +59,6 @@ async def run_chat(
         middleware=middleware,
     )
     runner = AgentRunner(graph)
-
-    # Chat loop
-    thread_id = "cli-session"
     console.print("[dim]Type 'quit' or 'exit' to end. 'clear' to reset.[/dim]\n")
 
     while True:

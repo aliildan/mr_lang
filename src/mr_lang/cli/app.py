@@ -5,12 +5,17 @@ from __future__ import annotations
 import typer
 
 from mr_lang import __version__
+from mr_lang.cli.init_cmd import init_app
+from mr_lang.cli.plugin_cmd import plugin_app
 
 app = typer.Typer(
     name="mr-lang",
     help="Agent orchestration framework built on LangChain/LangGraph.",
     no_args_is_help=True,
 )
+
+app.add_typer(init_app, name="init")
+app.add_typer(plugin_app, name="plugin")
 
 
 def version_callback(value: bool) -> None:
@@ -104,6 +109,18 @@ def serve(
             workspace=workspace, provider=provider, model=model, host=host, port=port
         )
     )
+
+
+@app.command()
+def monitor(
+    session: str = typer.Option(None, "--session", "-s", help="Show events for a specific session"),
+    tail: bool = typer.Option(False, "--tail", "-t", help="Live tail of events"),
+    log_dir: str = typer.Option(None, "--log-dir", help="Path to log directory"),
+) -> None:
+    """View observability data: sessions, events, and live tail."""
+    from mr_lang.cli.monitor_cmd import run_monitor
+
+    run_monitor(session=session, tail=tail, log_dir=log_dir)
 
 
 @app.command()

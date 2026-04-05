@@ -25,5 +25,9 @@ class WorkspaceError(MrLangError):
     """Workspace loading or validation error."""
 
 
+class PluginError(MrLangError):
+    """Plugin loading, discovery, or activation error."""
+
+
 class AdapterError(MrLangError):
     """Adapter lifecycle or message handling error."""
