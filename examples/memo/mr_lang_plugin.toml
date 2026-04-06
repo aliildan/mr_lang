@@ -1,0 +1,26 @@
+[plugin]
+name = "memo"
+version = "0.1.0"
+description = "Personal productivity assistant — notes, tasks, and daily briefings"
+author = "Your Name"
+
+[plugin.paths]
+workspace = "./workspace"
+skills    = "./src/memo/skills"
+tools_module = "memo.tools"
+
+[plugin.telegram]
+bot_token        = "${MEMO_TELEGRAM_TOKEN}"
+auth_mode        = "allowlist"
+admin_user_ids   = []        # your Telegram user ID
+allowed_user_ids = []        # your Telegram user ID
+
+[plugin.memory]
+enabled         = true
+embedding_model = "nomic-embed-text"
+
+[plugin.rag]
+backend     = "chroma"
+persist_dir = "./.rag_data"
+chunk_size  = 600
+chunk_overlap = 80

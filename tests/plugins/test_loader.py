@@ -348,3 +348,115 @@ bot_token = "${MISSING_TOKEN}"
 
         with pytest.raises(PluginError, match="MISSING_TOKEN.*not set"):
             PluginLoader.load_from_manifest(p)
+
+
+# ---------------------------------------------------------------------------
+# MCP server config parsing
+# ---------------------------------------------------------------------------
+
+
+class TestMcpServersParsing:
+    """Verify that [plugin.mcp.servers] entries are parsed correctly."""
+
+    def test_legacy_string_url_is_preserved(self, tmp_path: Path) -> None:
+        """A plain string URL stays as a string in mcp_servers."""
+        toml = """\
+[plugin]
+name = "legacy-mcp"
+
+[plugin.mcp]
+servers = ["http://localhost:9000"]
+"""
+        p = tmp_path / "mr_lang_plugin.toml"
+        p.write_text(toml, encoding="utf-8")
+        m = PluginLoader.load_from_manifest(p)
+        assert m.mcp_servers == ["http://localhost:9000"]
+
+    def test_dict_server_with_url_parsed_as_mcp_server_config(self, tmp_path: Path) -> None:
+        """A dict server entry with a URL is parsed into McpServerConfig."""
+        from mr_lang.plugins.schema import McpServerConfig
+
+        toml = """\
+[plugin]
+name = "url-mcp"
+
+[[plugin.mcp.servers]]
+name = "s1"
+url = "http://host/sse"
+"""
+        p = tmp_path / "mr_lang_plugin.toml"
+        p.write_text(toml, encoding="utf-8")
+        m = PluginLoader.load_from_manifest(p)
+        assert len(m.mcp_servers) == 1
+        server = m.mcp_servers[0]
+        assert isinstance(server, McpServerConfig)
+        assert server.name == "s1"
+        assert server.url == "http://host/sse"
+
+    def test_dict_server_with_command_and_args(self, tmp_path: Path) -> None:
+        """A stdio server entry is parsed with command and args fields."""
+        from mr_lang.plugins.schema import McpServerConfig
+
+        toml = """\
+[plugin]
+name = "stdio-mcp"
+
+[[plugin.mcp.servers]]
+name = "playwright"
+command = "npx"
+args = ["-y", "@playwright/mcp"]
+"""
+        p = tmp_path / "mr_lang_plugin.toml"
+        p.write_text(toml, encoding="utf-8")
+        m = PluginLoader.load_from_manifest(p)
+        assert len(m.mcp_servers) == 1
+        server = m.mcp_servers[0]
+        assert isinstance(server, McpServerConfig)
+        assert server.name == "playwright"
+        assert server.command == "npx"
+        assert server.args == ["-y", "@playwright/mcp"]
+
+    def test_dict_server_with_env_and_cwd_preserved(self, tmp_path: Path) -> None:
+        """env and cwd fields on a dict server are preserved in McpServerConfig."""
+        from mr_lang.plugins.schema import McpServerConfig
+
+        toml = """\
+[plugin]
+name = "env-mcp"
+
+[[plugin.mcp.servers]]
+name = "envserver"
+command = "mybin"
+cwd = "/tmp/mydir"
+
+[plugin.mcp.servers.env]
+MY_VAR = "hello"
+OTHER_VAR = "world"
+"""
+        p = tmp_path / "mr_lang_plugin.toml"
+        p.write_text(toml, encoding="utf-8")
+        m = PluginLoader.load_from_manifest(p)
+        assert len(m.mcp_servers) == 1
+        server = m.mcp_servers[0]
+        assert isinstance(server, McpServerConfig)
+        assert server.env == {"MY_VAR": "hello", "OTHER_VAR": "world"}
+        assert server.cwd == "/tmp/mydir"
+
+    def test_mixed_string_and_dict_servers(self, tmp_path: Path) -> None:
+        """An inline array containing both a string and a dict produces a mixed list."""
+        from mr_lang.plugins.schema import McpServerConfig
+
+        toml = """\
+[plugin]
+name = "mixed-mcp"
+
+[plugin.mcp]
+servers = ["http://legacy:9000", {name = "modern", url = "http://modern/sse"}]
+"""
+        p = tmp_path / "mr_lang_plugin.toml"
+        p.write_text(toml, encoding="utf-8")
+        m = PluginLoader.load_from_manifest(p)
+        assert len(m.mcp_servers) == 2
+        assert m.mcp_servers[0] == "http://legacy:9000"
+        assert isinstance(m.mcp_servers[1], McpServerConfig)
+        assert m.mcp_servers[1].name == "modern"

@@ -1,0 +1,22 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "memo"
+version = "0.1.0"
+description = "Personal productivity assistant plugin for mr-lang"
+requires-python = ">=3.11"
+dependencies = [
+    "mr-lang>=0.1.0",
+]
+
+[project.entry-points."mr_lang.plugins"]
+memo = "memo:get_plugin_manifest"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/memo"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"

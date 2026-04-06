@@ -60,18 +60,18 @@ src/mr_lang/
   adapters/
     telegram/
       bot.py               # TelegramBot — lifecycle + dynamic skill commands
-      handlers.py          # Command, message, and skill handlers with auth
+      handlers.py          # Command, message, skill, photo and document handlers; _run_with_typing loop
       auth.py              # AuthGuard — invite codes, allowlist, admin roles
-      sessions.py          # SessionManager — per-user thread IDs
+      sessions.py          # SessionManager — per-user thread IDs (timestamp-based)
     mcp/
       server.py            # McpServer — expose agent + tools as MCP
-      client.py            # load_mcp_tools() — consume remote MCP servers
+      client.py            # load_mcp_tools() — SSE and stdio transports; tool results truncated to 2000 chars
   memory/
     checkpointer.py        # LangGraph checkpointer factory (memory/sqlite/postgres)
     store.py               # LangGraph store factory with embedding support
   middleware/
     base.py                # Middleware Protocol (model, tool, run, error hooks)
-    logging_mw.py          # Timing, token usage, tool call logging
+    logging_mw.py          # Timing, token usage, tool call logging; verbose mode with _RESULT_PREVIEW_LEN truncation
     rate_limit.py          # Token-bucket rate limiting
     summarization.py       # Auto-summarize long conversations
     langsmith_mw.py        # LangSmith env var bridge
@@ -83,16 +83,16 @@ src/mr_lang/
     routes.py              # REST API for sessions/events (aiohttp)
     dashboard.py           # Single-page HTML dashboard (inline JS/CSS)
   plugins/
-    schema.py              # PluginManifest + TelegramConfig + MemoryConfig + RagConfig
+    schema.py              # PluginManifest + TelegramConfig + MemoryConfig + RagConfig + McpServerConfig
     loader.py              # PluginLoader — discover + activate from TOML manifests
     scaffold.py            # scaffold_project() + WizardConfig
     integrations.py        # load_plugins_into_registries() helper
 tests/
-  adapters/                # Telegram (sessions, auth), MCP server
+  adapters/                # Telegram (sessions, auth), MCP server, MCP client (_build_args_schema, _extract_text)
   core/                    # Registry
-  middleware/              # Logging middleware
+  middleware/              # Logging middleware (including verbose mode)
   observability/           # Event collector
-  plugins/                 # Loader, scaffold, env var expansion, telegram config
+  plugins/                 # Loader, scaffold, env var expansion, telegram config, MCP server config parsing
   skills/                  # Skill loader
   workspace/               # Workspace loader + builder
 ```
@@ -147,6 +147,9 @@ max_uses_per_code = 0
 
 Bot tokens support `${ENV_VAR}` syntax with 3-tier resolution: os.environ → plugin's `.env` → project `.env`.
 
+#### Telegram File Uploads
+The bot handles photos and documents via `make_photo_handler` and `make_document_handler` in `handlers.py`. Files are downloaded to `MR_LANG_INBOX_DIR` (default `~/.local/share/mr-lang/inbox`) and passed to the agent for analysis. PDF text is extracted via PyMuPDF (`fitz`). All message handlers use `_run_with_typing`, which loops `send_chat_action(TYPING)` every 4 seconds until the agent responds — prevents the indicator from expiring on long tasks.
+
 ### Memory & RAG
 The framework provides three memory layers:
 1. **Conversation memory** (checkpointer) — per-thread message history, survives restarts with `sqlite` backend
@@ -172,10 +175,33 @@ chunk_overlap = 200
 - **Filesystem sandbox**: `MR_LANG_TOOLS_ALLOWED_PATHS` — comma-separated list of allowed directories. When set, `read_file`/`write_file`/`list_files` reject paths outside allowed roots. Off by default.
 - **Shell blocklist**: `MR_LANG_TOOLS_BLOCKED_COMMANDS` — comma-separated patterns. Default: `rm -rf /,mkfs,dd if=,:(){ :|:& };:`
 
+### MCP Servers (stdio and SSE)
+
+`McpServerConfig` in `plugins/schema.py` supports both transport types:
+
+```toml
+# SSE (HTTP/SSE)
+[[plugin.mcp.servers]]
+name = "my-server"
+url = "http://127.0.0.1:8000/sse"
+
+# stdio subprocess
+[[plugin.mcp.servers]]
+name = "playwright"
+command = "npx"
+args = ["-y", "@playwright/mcp"]
+cwd = "./path"            # defaults to plugin base_path
+env = { MY_VAR = "val" } # extra env vars for the subprocess
+```
+
+Legacy plain string URLs (`servers = ["http://..."]`) are still supported for backward compatibility.
+
+MCP tool results are truncated to 2000 chars by `_extract_text` in `client.py` to prevent context overflow (e.g., from base64 screenshots).
+
 ### Adapter
 A module connecting mr_lang agents to external interfaces. Current adapters:
-- **Telegram**: Bot with invite-code auth, admin commands, photo support (per-plugin config)
-- **MCP**: Server (expose tools) and Client (consume remote MCP tools)
+- **Telegram**: Bot with invite-code auth, admin commands, photo/document upload support (per-plugin config)
+- **MCP**: Server (expose tools) and Client (consume remote MCP tools — SSE or stdio)
 
 ## Development
 
@@ -185,8 +211,10 @@ pip install -e ".[all]"
 
 # Run CLI
 mr-lang --help
-mr-lang chat --workspace ./examples/workspaces/simple
-mr-lang chat --plugin my-plugin  # isolated to plugin context
+mr-lang chat --plugin my-plugin               # isolated to plugin context
+mr-lang chat --plugin my-plugin --verbose     # show tool call args + result previews
+mr-lang chat --plugin my-plugin --resume      # resume last session
+mr-lang chat --plugin my-plugin --session-id my-run  # named session (resumable)
 
 # Tests
 pytest
@@ -201,7 +229,6 @@ mr-lang init
 
 # Run Telegram bot (per-plugin)
 mr-lang telegram --plugin my-plugin
-mr-lang telegram --workspace ./examples/workspaces/simple
 
 # Serve as MCP server
 mr-lang serve --workspace ./examples/workspaces/simple
@@ -241,6 +268,8 @@ Key variables:
 - `MR_LANG_EMBEDDING_PROVIDER` / `MR_LANG_EMBEDDING_MODEL` — embedding config for semantic search
 - `MR_LANG_TOOLS_ALLOWED_PATHS` — filesystem sandbox paths (comma-separated)
 - `MR_LANG_TOOLS_BLOCKED_COMMANDS` — shell blocklist patterns (comma-separated)
+- `MR_LANG_AGENT_RECURSION_LIMIT` — max LangGraph steps per turn (default: 50)
+- `MR_LANG_INBOX_DIR` — where Telegram file uploads are saved (default: `~/.local/share/mr-lang/inbox`)
 
 ## Dependencies
 
