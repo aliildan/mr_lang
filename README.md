@@ -124,6 +124,9 @@ def lookup_student(student_id: str) -> str:
 
 ```bash
 mr-lang chat --plugin <plugin-name>                       # CLI (development)
+mr-lang chat --plugin <plugin-name> --verbose             # Show tool calls and results
+mr-lang chat --plugin <plugin-name> --resume              # Resume last session
+mr-lang chat --plugin <plugin-name> --session-id my-run   # Named session (resumable)
 mr-lang telegram --plugin <plugin-name>                   # Telegram bot (users)
 mr-lang serve --plugin <plugin-name> --host 0.0.0.0       # MCP server (other AI tools)
 ```
@@ -157,6 +160,18 @@ embedding_model = "nomic-embed-text"
 [plugin.rag]                                          # Optional
 backend = "chroma"
 persist_dir = "./.rag_data"
+
+# MCP servers — connect external tools to the agent
+[[plugin.mcp.servers]]                                # URL-based (SSE)
+name = "my-mcp-server"
+url = "http://127.0.0.1:8000/sse"
+
+[[plugin.mcp.servers]]                                # stdio subprocess
+name = "playwright"
+command = "npx"
+args = ["-y", "@playwright/mcp", "--output-dir", ".mr_lang/logs/playwright"]
+# env = { MY_VAR = "value" }                          # optional extra env vars
+# cwd = "./some/dir"                                  # defaults to plugin directory
 ```
 
 **Plugin isolation**: `--plugin herr-molly` loads only that plugin's tools, skills, and workspace. Other plugins can't see each other's memory or context.
@@ -282,6 +297,20 @@ MY_BOT_TELEGRAM_TOKEN=1234567890:ABCdefGHIjklMNOpqrSTUvwxYZ
 
 Skills are registered as Telegram `/` commands automatically — users see all capabilities in the command menu.
 
+### File Uploads
+
+The bot accepts **photos** and **documents** (PDF, text, etc.) directly from Telegram:
+
+- **Photo**: downloaded to `MR_LANG_INBOX_DIR` (default `~/.local/share/mr-lang/inbox`), passed to the agent for OCR and analysis
+- **PDF**: downloaded and text extracted via PyMuPDF (`pip install pymupdf`), then analyzed
+- **Other files** (`.txt`, `.md`, etc.): read directly
+
+After processing, the agent decides whether to store the content in memory or the knowledge base. Install PyMuPDF to enable PDF support:
+
+```bash
+pip install pymupdf
+```
+
 ```bash
 mr-lang telegram --plugin <plugin-name>
 ```
@@ -331,6 +360,8 @@ cp .env.example .env
 | `MR_LANG_TOOLS_ALLOWED_PATHS` | *(empty = all)* | Filesystem sandbox — comma-separated allowed dirs |
 | `MR_LANG_TOOLS_BLOCKED_COMMANDS` | `rm -rf /,...` | Shell blocklist — comma-separated patterns |
 | `MR_LANG_PLUGINS` | *(empty)* | Extra plugin directories — colon-separated |
+| `MR_LANG_AGENT_RECURSION_LIMIT` | `50` | Max LangGraph steps per agent turn |
+| `MR_LANG_INBOX_DIR` | `~/.local/share/mr-lang/inbox` | Where Telegram file uploads are saved |
 
 ---
 
@@ -339,7 +370,7 @@ cp .env.example .env
 | Command | What It Does |
 |---------|-------------|
 | `mr-lang init` | Scaffold a new plugin project (interactive wizard) |
-| `mr-lang chat` | Interactive chat with token streaming |
+| `mr-lang chat` | Interactive chat with token streaming (`--verbose`, `--resume`, `--session-id`) |
 | `mr-lang telegram` | Start Telegram bot for a plugin |
 | `mr-lang serve` | Start MCP server |
 | `mr-lang rag` | Index files into a plugin's knowledge base |
