@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import tomllib
 from importlib.metadata import entry_points
 from pathlib import Path
@@ -15,6 +16,45 @@ from mr_lang.plugins.schema import PluginManifest
 logger = logging.getLogger(__name__)
 
 MANIFEST_FILENAME = "mr_lang_plugin.toml"
+
+
+def _expand_env_vars(value: str, plugin_dir: Path | None = None) -> str:
+    """Replace ``${VAR_NAME}`` patterns with environment variable values.
+
+    Resolution order:
+    1. ``os.environ`` (shell exports, process env)
+    2. Plugin's own ``.env`` file (next to ``mr_lang_plugin.toml``)
+    3. Project-level ``.env`` in cwd
+    """
+    from dotenv import dotenv_values
+
+    _plugin_env: dict[str, str | None] | None = None
+    _project_env: dict[str, str | None] | None = None
+
+    def _replacer(match: re.Match[str]) -> str:
+        nonlocal _plugin_env, _project_env
+        var_name = match.group(1)
+
+        # 1. Shell / process environment
+        result = os.environ.get(var_name)
+
+        # 2. Plugin's own .env
+        if result is None and plugin_dir is not None:
+            if _plugin_env is None:
+                _plugin_env = dotenv_values(plugin_dir / ".env")
+            result = _plugin_env.get(var_name)
+
+        # 3. Project-level .env (cwd)
+        if result is None:
+            if _project_env is None:
+                _project_env = dotenv_values(".env")
+            result = _project_env.get(var_name)
+
+        if result is None:
+            raise PluginError(f"Environment variable ${{{var_name}}} is not set")
+        return result
+
+    return re.sub(r"\$\{([^}]+)\}", _replacer, value)
 
 
 class PluginLoader:
@@ -67,6 +107,20 @@ class PluginLoader:
         deps = plugin_section.get("dependencies", {})
         data["dependencies"] = deps.get("packages", [])
 
+        telegram = plugin_section.get("telegram")
+        if telegram is not None:
+            raw_token = telegram.get("bot_token", "")
+            telegram["bot_token"] = _expand_env_vars(raw_token, plugin_dir=path.parent)
+            data["telegram"] = telegram
+
+        memory = plugin_section.get("memory")
+        if memory is not None:
+            data["memory"] = memory
+
+        rag = plugin_section.get("rag")
+        if rag is not None:
+            data["rag"] = rag
+
         manifest = PluginManifest(**{k: v for k, v in data.items() if v is not None})
         manifest.base_path = path.parent
         return manifest
@@ -77,12 +131,13 @@ class PluginLoader:
 
     @classmethod
     def discover_plugins(cls) -> list[PluginManifest]:
-        """Find plugins from entry points, cwd, and ``MR_LANG_PLUGINS`` env var.
+        """Find plugins from entry points, cwd, plugins dir, and env var.
 
         Discovery sources (in order):
         1. ``mr_lang.plugins`` entry-point group (pip-installed plugins).
         2. ``mr_lang_plugin.toml`` in the current working directory.
-        3. Colon-separated paths in the ``MR_LANG_PLUGINS`` environment variable.
+        3. Each subdirectory of ``./plugins/`` in the current working directory.
+        4. Colon-separated paths in the ``MR_LANG_PLUGINS`` environment variable.
 
         Returns:
             De-duplicated list of PluginManifest instances.
@@ -107,7 +162,20 @@ class PluginLoader:
             except PluginError as exc:
                 logger.warning("Skipping cwd manifest: %s", exc)
 
-        # 3. env var
+        # 3. ./plugins/ subdirectories
+        plugins_dir = Path.cwd() / "plugins"
+        if plugins_dir.is_dir():
+            for child in sorted(plugins_dir.iterdir()):
+                if not child.is_dir():
+                    continue
+                child_manifest = child / MANIFEST_FILENAME
+                if child_manifest.exists():
+                    try:
+                        _add(cls.load_from_manifest(child_manifest))
+                    except PluginError as exc:
+                        logger.warning("Skipping plugin %s: %s", child.name, exc)
+
+        # 4. env var
         env_val = os.environ.get("MR_LANG_PLUGINS", "")
         for raw_path in env_val.split(":"):
             raw_path = raw_path.strip()

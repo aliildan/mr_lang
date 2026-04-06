@@ -20,10 +20,22 @@ DEFAULT_LOG_DIR = Path(".mr_lang/logs")
 # ------------------------------------------------------------------
 
 
+_EVENT_COLORS = {
+    "model_call_start": "magenta",
+    "model_call_end": "magenta",
+    "tool_call_start": "yellow",
+    "tool_call_end": "yellow",
+    "session_start": "cyan",
+    "session_end": "green",
+    "error": "red",
+}
+
+
 def run_monitor(
     session: str | None = None,
     tail: bool = False,
     log_dir: str | None = None,
+    output_json: bool = False,
 ) -> None:
     """Main dispatcher for ``mr-lang monitor``."""
     logs = Path(log_dir) if log_dir else DEFAULT_LOG_DIR
@@ -33,7 +45,9 @@ def run_monitor(
         console.print("[yellow]No log directory found.[/yellow] Nothing to show.")
         return
 
-    if session:
+    if output_json:
+        _show_json(console, logs, session)
+    elif session:
         _show_session_detail(console, logs, session)
     elif tail:
         _live_tail(console, logs)
@@ -77,6 +91,11 @@ def _show_sessions_table(console: Console, logs: Path) -> None:
 # ------------------------------------------------------------------
 
 
+def _colorize_event(event_type: str) -> str:
+    color = _EVENT_COLORS.get(event_type, "white")
+    return f"[{color}]{event_type}[/{color}]"
+
+
 def _show_session_detail(console: Console, logs: Path, session_id: str) -> None:
     path = logs / f"{session_id}.jsonl"
     if not path.exists():
@@ -86,17 +105,43 @@ def _show_session_detail(console: Console, logs: Path, session_id: str) -> None:
     events = _load_file(path)
     table = Table(title=f"Events for session [cyan]{session_id}[/cyan]")
     table.add_column("Timestamp")
-    table.add_column("Type", style="magenta")
+    table.add_column("Type")
     table.add_column("Data")
 
     for ev in events:
         table.add_row(
             ev.timestamp,
-            ev.event_type.value,
+            _colorize_event(ev.event_type.value),
             json.dumps(ev.data, default=str)[:120],
         )
 
     console.print(table)
+
+
+def _show_json(console: Console, logs: Path, session_id: str | None) -> None:
+    """Output sessions or events as JSON."""
+    if session_id:
+        path = logs / f"{session_id}.jsonl"
+        if not path.exists():
+            console.print(f"[red]Session '{session_id}' not found.[/red]")
+            return
+        events = _load_file(path)
+        output = [e.model_dump() for e in events]
+    else:
+        files = sorted(logs.glob("*.jsonl"))
+        output = []
+        for path in files:
+            events = _load_file(path)
+            if events:
+                output.append(
+                    {
+                        "session_id": path.stem,
+                        "event_count": len(events),
+                        "first_event": events[0].timestamp,
+                        "last_event": events[-1].timestamp,
+                    }
+                )
+    console.print_json(json.dumps(output, default=str))
 
 
 # ------------------------------------------------------------------
@@ -117,13 +162,13 @@ def _live_tail(console: Console, logs: Path) -> None:
         table = Table(title="Live Events (last 30)")
         table.add_column("Timestamp")
         table.add_column("Session", style="cyan")
-        table.add_column("Type", style="magenta")
+        table.add_column("Type")
         table.add_column("Data")
         for ev in recent[-max_recent:]:
             table.add_row(
                 ev.timestamp,
                 ev.session_id,
-                ev.event_type.value,
+                _colorize_event(ev.event_type.value),
                 json.dumps(ev.data, default=str)[:100],
             )
         return table
@@ -141,9 +186,7 @@ def _live_tail(console: Console, logs: Path) -> None:
                             for line in fh:
                                 line = line.strip()
                                 if line:
-                                    ev = ObservabilityEvent.model_validate(
-                                        json.loads(line)
-                                    )
+                                    ev = ObservabilityEvent.model_validate(json.loads(line))
                                     recent.append(ev)
                                     changed = True
                         offsets[path] = size
@@ -166,7 +209,5 @@ def _load_file(path: Path) -> list[ObservabilityEvent]:
         for line in fh:
             line = line.strip()
             if line:
-                events.append(
-                    ObservabilityEvent.model_validate(json.loads(line))
-                )
+                events.append(ObservabilityEvent.model_validate(json.loads(line)))
     return events

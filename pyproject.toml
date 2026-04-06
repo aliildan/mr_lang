@@ -11,14 +11,17 @@ license = "MIT"
 dependencies = [
     "langchain-core>=0.3",
     "langgraph>=0.3",
+    "langgraph-checkpoint-sqlite>=3.0",
     "langsmith>=0.2",
     "typer>=0.15",
     "rich>=13",
     "pydantic>=2.0",
     "pydantic-settings>=2.0",
+    "python-dotenv>=1.0",
     "httpx>=0.27",
     "pyyaml>=6.0",
     "python-frontmatter>=1.1",
+    "aiosqlite>=0.20",
 ]
 
 [project.optional-dependencies]
@@ -27,6 +30,9 @@ openai = ["langchain-openai>=0.3"]
 anthropic = ["langchain-anthropic>=0.3"]
 telegram = ["python-telegram-bot>=21"]
 mcp = ["fastmcp>=2"]
+dashboard = ["aiohttp>=3.9"]
+rag-chroma = ["langchain-chroma>=0.2", "langchain-text-splitters>=0.3"]
+rag-faiss = ["langchain-community>=0.3", "faiss-cpu>=1.7", "langchain-text-splitters>=0.3"]
 postgres = ["psycopg[binary]>=3", "langgraph-checkpoint-postgres>=2"]
 dev = [
     "pytest>=8",
@@ -35,7 +41,7 @@ dev = [
     "ruff>=0.8",
     "mypy>=1.13",
 ]
-all = ["mr-lang[ollama,openai,anthropic,telegram,mcp,postgres,dev]"]
+all = ["mr-lang[ollama,openai,anthropic,telegram,mcp,dashboard,rag-chroma,postgres,dev]"]
 
 [project.scripts]
 mr-lang = "mr_lang.cli.app:app"

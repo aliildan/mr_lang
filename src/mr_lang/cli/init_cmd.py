@@ -11,7 +11,7 @@ from rich.prompt import Confirm, Prompt
 from rich.table import Table
 from rich.text import Text
 
-from mr_lang.plugins.scaffold import TEMPLATES, WizardConfig, scaffold_project
+from mr_lang.plugins.scaffold import TelegramWizardConfig, WizardConfig, scaffold_project
 
 console = Console(stderr=True)
 
@@ -20,9 +20,47 @@ console = Console(stderr=True)
 # ---------------------------------------------------------------------------
 
 _PROVIDERS = {
-    "ollama": {"label": "Ollama (local or cloud)"},
-    "openai": {"label": "OpenAI"},
-    "anthropic": {"label": "Anthropic"},
+    "ollama": {"label": "Ollama (local or cloud)", "model_hint": "llama3"},
+    "openai": {"label": "OpenAI", "model_hint": "gpt-4o"},
+    "anthropic": {"label": "Anthropic", "model_hint": "claude-sonnet-4-6"},
+}
+
+_RESERVED_NAMES = {
+    "test",
+    "tests",
+    "os",
+    "sys",
+    "io",
+    "re",
+    "json",
+    "typing",
+    "types",
+    "logging",
+    "math",
+    "time",
+    "datetime",
+    "collections",
+    "abc",
+    "ast",
+    "asyncio",
+    "http",
+    "email",
+    "html",
+    "xml",
+    "csv",
+    "sqlite3",
+    "mr_lang",
+    "mr-lang",
+    "pip",
+    "setup",
+    "pkg_resources",
+    "importlib",
+}
+
+_AUTH_MODES = {
+    "invite": "Users need an invite code (admins generate with /invite)",
+    "allowlist": "Only pre-approved Telegram user IDs can chat",
+    "open": "Anyone can chat with the bot",
 }
 
 # ---------------------------------------------------------------------------
@@ -39,18 +77,16 @@ init_app = typer.Typer(
 @init_app.callback(invoke_without_command=True)
 def init(
     name: str = typer.Argument(None, help="Project name (kebab-case)"),
-    template: str = typer.Option("", "--template", "-t", help="Skip wizard, use template directly"),
     description: str = typer.Option("", "--description", "-d", help="Short description"),
-    path: str = typer.Option(".", "--path", "-p", help="Parent directory"),
+    path: str = typer.Option("plugins", "--path", "-p", help="Parent directory for the plugin"),
     no_wizard: bool = typer.Option(False, "--no-wizard", help="Skip interactive wizard"),
 ) -> None:
     """Create a new plugin project. Runs an interactive wizard by default."""
-    if no_wizard or template:
-        # Non-interactive mode
+    if no_wizard:
         if not name:
             console.print("[red]Error:[/red] Project name is required in non-interactive mode.")
             raise typer.Exit(code=1)
-        _run_quick(name, template or "basic", description, path)
+        _run_quick(name, description, path)
     else:
         _run_wizard(name, path)
 
@@ -60,14 +96,14 @@ def init(
 # ---------------------------------------------------------------------------
 
 
-def _run_quick(name: str, template: str, description: str, path: str) -> None:
+def _run_quick(name: str, description: str, path: str) -> None:
     desc = description or f"A mr_lang plugin: {name.replace('-', ' ').title()}"
     try:
-        root = scaffold_project(name=name, path=Path(path), template=template, description=desc)
+        root = scaffold_project(name=name, path=Path(path), description=desc)
     except Exception as exc:
         console.print(f"[red]Error:[/red] {exc}")
         raise typer.Exit(code=1) from exc
-    _print_success(name, root)
+    _print_success(name, root, WizardConfig())
 
 
 # ---------------------------------------------------------------------------
@@ -92,34 +128,22 @@ def _run_wizard(initial_name: str | None, path: str) -> None:
     # ── Step 1: Project name ──────────────────────────────────────────
     _step_header(1, "Project Name")
     wiz.name = Prompt.ask(
-        "  Project name [dim](kebab-case)[/dim]",
+        "  Project name [dim](kebab-case, e.g. my-tutor)[/dim]",
         default=initial_name or "",
     ).strip()
     if not wiz.name:
         console.print("[red]Name is required.[/red]")
         raise typer.Exit(code=1)
+    module_name = wiz.name.replace("-", "_")
+    if module_name in _RESERVED_NAMES or wiz.name in _RESERVED_NAMES:
+        console.print(
+            f"[red]'{wiz.name}' conflicts with a Python stdlib or framework module. "
+            f"Pick a different name (e.g. my-{wiz.name}).[/red]"
+        )
+        raise typer.Exit(code=1)
 
-    # ── Step 2: Template ──────────────────────────────────────────────
-    _step_header(2, "Template")
-    choices = sorted(TEMPLATES)
-    table = Table(show_header=False, box=None, padding=(0, 2))
-    table.add_column("Key", style="bold cyan", width=4)
-    table.add_column("Template")
-    for i, tmpl in enumerate(choices, 1):
-        table.add_row(f"  {i}", tmpl)
-    console.print(table)
-
-    raw = Prompt.ask("  Select template", default="1").strip()
-    if raw.isdigit() and 1 <= int(raw) <= len(choices):
-        wiz.template = choices[int(raw) - 1]
-    elif raw in TEMPLATES:
-        wiz.template = raw
-    else:
-        console.print(f"[yellow]Unknown '{raw}', defaulting to 'basic'[/yellow]")
-        wiz.template = "basic"
-
-    # ── Step 3: Description & Author ──────────────────────────────────
-    _step_header(3, "About")
+    # ── Step 2: Description & Author ──────────────────────────────────
+    _step_header(2, "About")
     display = wiz.name.replace("-", " ").title()
     wiz.description = Prompt.ask(
         "  Description",
@@ -127,11 +151,11 @@ def _run_wizard(initial_name: str | None, path: str) -> None:
     )
     wiz.author = Prompt.ask("  Author name", default="")
 
-    # ── Step 4: Agent personality ─────────────────────────────────────
-    _step_header(4, "Agent Personality")
+    # ── Step 3: Agent personality ─────────────────────────────────────
+    _step_header(3, "Agent Personality")
     wiz.agent_name = Prompt.ask("  Agent display name", default=display)
     wiz.agent_role = Prompt.ask(
-        "  Agent role [dim](e.g., Teaching Assistant, Code Reviewer)[/dim]",
+        "  Agent role [dim](e.g. Math Tutor, Code Reviewer, Support Agent)[/dim]",
         default="",
     )
     wiz.language = Prompt.ask("  Language(s)", default="English")
@@ -140,8 +164,8 @@ def _run_wizard(initial_name: str | None, path: str) -> None:
         default="",
     )
 
-    # ── Step 5: Model provider ────────────────────────────────────────
-    _step_header(5, "Model Provider")
+    # ── Step 4: Model provider ────────────────────────────────────────
+    _step_header(4, "Model Provider")
     ptable = Table(show_header=False, box=None, padding=(0, 2))
     ptable.add_column("Key", style="bold cyan", width=4)
     ptable.add_column("Provider")
@@ -158,8 +182,9 @@ def _run_wizard(initial_name: str | None, path: str) -> None:
     else:
         wiz.provider = "ollama"
 
+    model_hint = _PROVIDERS[wiz.provider]["model_hint"]
     wiz.model = Prompt.ask(
-        "  Model name [dim](e.g. llama3, gpt-4o, claude-sonnet-4-6)[/dim]",
+        f"  Model name [dim](e.g. {model_hint})[/dim]",
         default="",
     )
 
@@ -169,11 +194,81 @@ def _run_wizard(initial_name: str | None, path: str) -> None:
             default="",
         )
 
-    # ── Step 6: Adapters & MCP ────────────────────────────────────────
-    _step_header(6, "Integrations")
+    # ── Step 5: Memory & RAG ─────────────────────────────────────────
+    _step_header(5, "Memory & Knowledge")
+    wiz.enable_memory = Confirm.ask(
+        "  Enable agent memory? [dim](remember/recall facts about users)[/dim]",
+        default=True,
+    )
+    wiz.enable_rag = Confirm.ask(
+        "  Enable knowledge base (RAG)? [dim](search documents/textbooks)[/dim]",
+        default=False,
+    )
+    if wiz.enable_rag:
+        rag_choices = ["chroma", "faiss"]
+        raw_rag = Prompt.ask(
+            "  RAG backend [dim](chroma, faiss)[/dim]",
+            default="chroma",
+        ).strip()
+        wiz.rag_backend = raw_rag if raw_rag in rag_choices else "chroma"
+    if wiz.enable_memory or wiz.enable_rag:
+        wiz.embedding_model = Prompt.ask(
+            "  Embedding model",
+            default="nomic-embed-text",
+        )
+
+    # ── Step 6: Telegram ─────────────────────────────────────────────
+    _step_header(6, "Telegram Bot")
     wiz.enable_telegram = Confirm.ask("  Enable Telegram bot?", default=False)
 
-    add_mcp = Confirm.ask("  Connect to external MCP servers?", default=False)
+    if wiz.enable_telegram:
+        tg = TelegramWizardConfig()
+
+        tg.bot_token = Prompt.ask(
+            "  Bot token [dim](from @BotFather, or leave empty to set later)[/dim]",
+            default="",
+        ).strip()
+
+        # Auth mode
+        console.print()
+        for i, (mode, desc) in enumerate(_AUTH_MODES.items(), 1):
+            console.print(f"    [bold cyan]{i}[/bold cyan]  {mode} — {desc}")
+        raw_auth = Prompt.ask("  Auth mode", default="1").strip()
+        auth_keys = list(_AUTH_MODES.keys())
+        if raw_auth.isdigit() and 1 <= int(raw_auth) <= len(auth_keys):
+            tg.auth_mode = auth_keys[int(raw_auth) - 1]
+        elif raw_auth in _AUTH_MODES:
+            tg.auth_mode = raw_auth
+        else:
+            tg.auth_mode = "invite"
+
+        # Admin user IDs
+        raw_admins = Prompt.ask(
+            "  Admin Telegram user ID(s) [dim](comma-separated, or empty)[/dim]",
+            default="",
+        ).strip()
+        if raw_admins:
+            tg.admin_user_ids = _parse_int_list(raw_admins)
+            # Admins are also allowed users by default
+            tg.allowed_user_ids = list(tg.admin_user_ids)
+
+        if tg.auth_mode == "allowlist":
+            raw_allowed = Prompt.ask(
+                "  Allowed user ID(s) [dim](comma-separated, admins already included)[/dim]",
+                default="",
+            ).strip()
+            if raw_allowed:
+                extra = _parse_int_list(raw_allowed)
+                tg.allowed_user_ids = list(set(tg.allowed_user_ids) | set(extra))
+
+        wiz.telegram = tg
+
+    # ── Step 7: MCP servers ──────────────────────────────────────────
+    _step_header(7, "External MCP Servers")
+    add_mcp = Confirm.ask(
+        "  Connect to external MCP servers? [dim](optional)[/dim]",
+        default=False,
+    )
     if add_mcp:
         console.print("  [dim]Enter MCP server URLs one per line. Empty line to finish.[/dim]")
         while True:
@@ -190,7 +285,6 @@ def _run_wizard(initial_name: str | None, path: str) -> None:
     summary.add_column("Field", style="bold")
     summary.add_column("Value")
     summary.add_row("Name", wiz.name)
-    summary.add_row("Template", wiz.template)
     summary.add_row("Description", wiz.description)
     summary.add_row("Author", wiz.author or "[dim]not set[/dim]")
     agent_desc = wiz.agent_name
@@ -200,12 +294,30 @@ def _run_wizard(initial_name: str | None, path: str) -> None:
     summary.add_row("Language", wiz.language)
     provider_desc = wiz.provider
     if wiz.model:
-        provider_desc += f"/{wiz.model}"
+        provider_desc += f" / {wiz.model}"
     if wiz.ollama_base_url:
         provider_desc += f" @ {wiz.ollama_base_url}"
     summary.add_row("Provider", provider_desc)
-    summary.add_row("Telegram", "yes" if wiz.enable_telegram else "no")
-    summary.add_row("MCP servers", str(len(wiz.mcp_servers)))
+
+    # Features
+    features: list[str] = []
+    if wiz.enable_memory:
+        features.append("memory")
+    if wiz.enable_rag:
+        features.append(f"RAG ({wiz.rag_backend})")
+    if wiz.enable_telegram:
+        tg_desc = "Telegram"
+        if wiz.telegram:
+            tg_desc += f" ({wiz.telegram.auth_mode})"
+            if wiz.telegram.bot_token:
+                tg_desc += " [green]token set[/green]"
+            else:
+                tg_desc += " [yellow]token not set[/yellow]"
+        features.append(tg_desc)
+    if wiz.mcp_servers:
+        features.append(f"{len(wiz.mcp_servers)} MCP server(s)")
+    summary.add_row("Features", ", ".join(features) if features else "[dim]none[/dim]")
+
     console.print(summary)
     console.print()
 
@@ -214,15 +326,10 @@ def _run_wizard(initial_name: str | None, path: str) -> None:
         raise typer.Exit()
 
     # ── Create ────────────────────────────────────────────────────────
-    template = wiz.template
-    if wiz.enable_telegram and template != "telegram-bot":
-        template = "telegram-bot"
-
     try:
         root = scaffold_project(
             name=wiz.name,
             path=Path(path),
-            template=template,
             description=wiz.description,
             wizard=wiz,
         )
@@ -230,7 +337,7 @@ def _run_wizard(initial_name: str | None, path: str) -> None:
         console.print(f"[red]Error:[/red] {exc}")
         raise typer.Exit(code=1) from exc
 
-    _print_success(wiz.name, root)
+    _print_success(wiz.name, root, wiz)
 
 
 # ---------------------------------------------------------------------------
@@ -246,18 +353,69 @@ def _step_header(number: int, title: str) -> None:
     console.print(text)
 
 
-def _print_success(name: str, root: Path) -> None:
+def _parse_int_list(raw: str) -> list[int]:
+    """Parse comma-separated integers, skipping invalid values."""
+    result: list[int] = []
+    for part in raw.split(","):
+        part = part.strip()
+        if part.isdigit():
+            result.append(int(part))
+        elif part:
+            console.print(f"  [yellow]Skipping invalid ID: {part}[/yellow]")
+    return result
+
+
+def _print_success(name: str, root: Path, wiz: WizardConfig) -> None:
+    module = name.replace("-", "_")
+    # Show path relative to cwd for cleaner output
+    try:
+        rel_root = root.relative_to(Path.cwd())
+    except ValueError:
+        rel_root = root
+
+    lines = [
+        f"[bold green]Project created:[/bold green] {rel_root}",
+        "",
+        "[bold]Next steps:[/bold]",
+        f"  pip install -e {rel_root}",
+        f"  mr-lang chat --plugin {name}",
+    ]
+
+    if wiz.enable_rag:
+        if wiz.rag_backend == "chroma":
+            rag_pkg = "langchain-chroma"
+        else:
+            rag_pkg = "langchain-community faiss-cpu"
+        lines += [
+            "",
+            "[yellow]RAG:[/yellow] Install the vector store backend:",
+            f"  pip install {rag_pkg}",
+        ]
+
+    if wiz.enable_telegram and (not wiz.telegram or not wiz.telegram.bot_token):
+        lines += [
+            "",
+            f"[yellow]Telegram:[/yellow] Set your bot token in [bold]{rel_root}/.env[/bold]:",
+            f"  {module.upper()}_TELEGRAM_TOKEN=<your-token-from-BotFather>",
+        ]
+
+    if wiz.enable_telegram:
+        lines += [
+            "",
+            f"  mr-lang telegram --plugin {name}",
+        ]
+
+    lines += [
+        "",
+        f"[dim]Edit {rel_root}/workspace/*.md to customize your agent.",
+        f"Add tools in {rel_root}/src/{module}/tools/__init__.py",
+        f"Add skills in {rel_root}/src/{module}/skills/[/dim]",
+    ]
+
     console.print()
     console.print(
         Panel(
-            f"[bold green]Project created:[/bold green] {root}\n\n"
-            f"[bold]Next steps:[/bold]\n"
-            f"  cd {name}\n"
-            f"  pip install -e .\n"
-            f"  mr-lang chat --workspace ./workspace\n\n"
-            f"[dim]Edit workspace/*.md files to customize your agent.\n"
-            f"Add tools in src/{name.replace('-', '_')}/tools/__init__.py\n"
-            f"Add skills in src/{name.replace('-', '_')}/skills/[/dim]",
+            "\n".join(lines),
             border_style="green",
             padding=(1, 2),
         )

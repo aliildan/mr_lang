@@ -55,18 +55,14 @@ async def test_get_session_events_empty(collector: EventCollector) -> None:
 
 @pytest.mark.asyncio
 async def test_get_session_stats(collector: EventCollector) -> None:
-    await collector.record(
-        _make_event(EventType.MODEL_CALL_START, data={"messages_count": 2})
-    )
+    await collector.record(_make_event(EventType.MODEL_CALL_START, data={"messages_count": 2}))
     await collector.record(
         _make_event(
             EventType.MODEL_CALL_END,
             data={"total_tokens": 150, "duration_ms": 320.5, "tool_calls_count": 1},
         )
     )
-    await collector.record(
-        _make_event(EventType.MODEL_CALL_START, data={"messages_count": 4})
-    )
+    await collector.record(_make_event(EventType.MODEL_CALL_START, data={"messages_count": 4}))
     await collector.record(
         _make_event(
             EventType.MODEL_CALL_END,

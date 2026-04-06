@@ -40,7 +40,5 @@ class LangSmithMiddleware(BaseMiddleware):
         self._applied = True
         return state
 
-    async def after_model(
-        self, state: AgentState, response: BaseMessage
-    ) -> BaseMessage:
+    async def after_model(self, state: AgentState, response: BaseMessage) -> BaseMessage:
         return response

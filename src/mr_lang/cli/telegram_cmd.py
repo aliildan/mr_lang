@@ -7,70 +7,100 @@ import signal
 
 from rich.console import Console
 
-from mr_lang.adapters.telegram import TelegramBot
-from mr_lang.config import MrLangConfig
-from mr_lang.core.graph import build_agent_graph
-from mr_lang.core.registry import ToolRegistry
-from mr_lang.core.runner import AgentRunner
+from mr_lang.adapters.telegram import AuthConfig, TelegramBot
+from mr_lang.cli.setup import setup_agent
 from mr_lang.exceptions import AdapterError
-from mr_lang.middleware.logging_mw import LoggingMiddleware
-from mr_lang.providers.base import get_chat_model
-from mr_lang.tools.builtin import list_files, read_file, run_shell, write_file
-from mr_lang.workspace.builder import build_system_prompt
-from mr_lang.workspace.loader import load_workspace
+from mr_lang.plugins.loader import PluginLoader
 
 console = Console(stderr=True)
 
 
 async def run_telegram(
     workspace: str | None = None,
-    provider: str = "ollama",
-    model: str = "llama3",
+    provider: str | None = None,
+    model: str | None = None,
+    plugin: str | None = None,
 ) -> None:
     """Wire up workspace/provider/graph/runner and start the Telegram bot."""
-    config = MrLangConfig()
+    # Discover plugins first to resolve workspace before agent setup
+    manifests = PluginLoader.discover_plugins()
+    telegram_plugins = [m for m in manifests if m.telegram is not None]
 
-    # Load workspace if provided
-    system_prompt = "You are a helpful assistant."
-    if workspace:
-        ws = load_workspace(workspace)
-        system_prompt = build_system_prompt(ws)
-        console.print(f"[green]Loaded workspace:[/green] {workspace}")
-
-    # Set up model
-    provider = provider or config.default_provider
-    model = model or config.default_model
-    model_kwargs: dict = {}
-    if provider == "ollama" and config.ollama_base_url:
-        model_kwargs["base_url"] = config.ollama_base_url
-    chat_model = get_chat_model(provider, model, **model_kwargs)
-    console.print(f"[green]Model:[/green] {provider}/{model}")
-
-    # Set up tools
-    registry = ToolRegistry()
-    builtin_tools = [read_file, write_file, list_files, run_shell]
-    for t in builtin_tools:
-        registry.register(t)
-
-    # Build graph with middleware
-    middleware = [LoggingMiddleware()]
-    graph = build_agent_graph(
-        model=chat_model,
-        tools=registry.list(),
-        system_prompt=system_prompt,
-        middleware=middleware,
-    )
-    runner = AgentRunner(graph)
-
-    # Resolve token
-    token = config.telegram_bot_token
-    if not token:
+    manifest = None
+    if plugin:
+        matches = [m for m in telegram_plugins if m.name == plugin]
+        if not matches:
+            available = [m.name for m in manifests]
+            raise AdapterError(
+                f"Plugin '{plugin}' not found or has no [plugin.telegram] section. "
+                f"Available plugins: {', '.join(available) or 'none'}"
+            )
+        manifest = matches[0]
+    elif len(telegram_plugins) == 1:
+        manifest = telegram_plugins[0]
+        console.print(f"[dim]Auto-selected plugin: {manifest.name}[/dim]")
+    elif len(telegram_plugins) > 1:
+        names = ", ".join(m.name for m in telegram_plugins)
         raise AdapterError(
-            "Telegram bot token not configured. "
-            "Set MR_LANG_TELEGRAM_BOT_TOKEN env var or telegram_bot_token in config."
+            f"Multiple plugins have [plugin.telegram] config: {names}. "
+            f"Use --plugin <name> to select one."
         )
 
-    bot = TelegramBot(runner=runner, token=token)
+    # Use plugin's workspace if no explicit --workspace given
+    if manifest and not workspace:
+        ws_path = manifest.resolve_workspace()
+        if ws_path and ws_path.is_dir():
+            workspace = str(ws_path)
+            console.print(f"[green]Workspace:[/green] {workspace}")
+
+    components = await setup_agent(
+        workspace=workspace,
+        provider=provider,
+        model=model,
+        plugin_name=manifest.name if manifest else None,
+    )
+    config = components.config
+
+    if manifest and manifest.telegram:
+        # Plugin-sourced config
+        tc = manifest.telegram
+        token = tc.bot_token
+        auth_config = AuthConfig(
+            mode=tc.auth_mode or config.telegram_auth_mode,
+            allowed_user_ids=tc.allowed_user_ids or config.get_telegram_allowed_user_ids(),
+            admin_user_ids=tc.admin_user_ids or config.get_telegram_admin_user_ids(),
+            invite_codes=tc.invite_codes or config.get_telegram_invite_codes(),
+            max_uses_per_code=(
+                tc.max_uses_per_code
+                if tc.max_uses_per_code is not None
+                else config.telegram_max_uses_per_code
+            ),
+        )
+        console.print(f"[green]Plugin:[/green] {manifest.name}")
+    else:
+        # Legacy global config path
+        token = config.telegram_bot_token
+        if not token:
+            raise AdapterError(
+                "No Telegram bot token configured. Either add [plugin.telegram] "
+                "to your plugin's mr_lang_plugin.toml, or set MR_LANG_TELEGRAM_BOT_TOKEN."
+            )
+        auth_config = AuthConfig(
+            mode=config.telegram_auth_mode,
+            allowed_user_ids=config.get_telegram_allowed_user_ids(),
+            admin_user_ids=config.get_telegram_admin_user_ids(),
+            invite_codes=config.get_telegram_invite_codes(),
+            max_uses_per_code=config.telegram_max_uses_per_code,
+        )
+
+    console.print(f"[green]Auth mode:[/green] {auth_config.mode}")
+
+    bot = TelegramBot(
+        runner=components.runner,
+        token=token,
+        auth_config=auth_config,
+        skills=components.skill_registry.list(),
+    )
 
     # Handle graceful shutdown via signals
     loop = asyncio.get_running_loop()

@@ -7,6 +7,39 @@ from pathlib import Path
 from pydantic import BaseModel, Field
 
 
+class TelegramConfig(BaseModel):
+    """Per-plugin Telegram bot configuration."""
+
+    bot_token: str = Field(..., description="Bot token (supports ${ENV_VAR} syntax)")
+    auth_mode: str | None = Field(default=None, description="Auth mode override")
+    admin_user_ids: list[int] = Field(default_factory=list)
+    allowed_user_ids: list[int] = Field(default_factory=list)
+    invite_codes: list[str] = Field(default_factory=list)
+    max_uses_per_code: int | None = Field(
+        default=None, description="None = use global default"
+    )
+
+
+class MemoryConfig(BaseModel):
+    """Per-plugin memory configuration."""
+
+    enabled: bool = Field(default=True, description="Enable agent memory tools")
+    embedding_model: str = Field(
+        default="nomic-embed-text", description="Embedding model for semantic search"
+    )
+
+
+class RagConfig(BaseModel):
+    """Per-plugin RAG (knowledge base) configuration."""
+
+    backend: str = Field(default="chroma", description="Vector store backend: chroma, faiss")
+    persist_dir: str = Field(
+        default="./.rag_data", description="Directory to persist vector store"
+    )
+    chunk_size: int = Field(default=1000, description="Document chunk size in characters")
+    chunk_overlap: int = Field(default=200, description="Overlap between chunks")
+
+
 class PluginManifest(BaseModel):
     """Describes a mr_lang plugin and its capabilities."""
 
@@ -41,6 +74,21 @@ class PluginManifest(BaseModel):
     # Dependencies
     dependencies: list[str] = Field(
         default_factory=list, description="Pip packages needed by this plugin"
+    )
+
+    # Telegram bot config (optional — only if plugin owns a bot)
+    telegram: TelegramConfig | None = Field(
+        default=None, description="Per-plugin Telegram bot configuration"
+    )
+
+    # Memory config (optional)
+    memory: MemoryConfig | None = Field(
+        default=None, description="Per-plugin memory configuration"
+    )
+
+    # RAG config (optional)
+    rag: RagConfig | None = Field(
+        default=None, description="Per-plugin RAG/knowledge base configuration"
     )
 
     # Internal: resolved base path (set during loading)

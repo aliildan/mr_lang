@@ -41,6 +41,13 @@ Thumbs.db
 node_modules/
 package-lock.json
 
+# Claude Code
+.claude/settings.local.json
+
 # mr_lang runtime
+.mr_lang/
 *.db
 *.sqlite
+
+# initilazied plugins
+plugins

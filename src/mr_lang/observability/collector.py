@@ -40,9 +40,7 @@ class EventCollector:
     # Queries
     # ------------------------------------------------------------------
 
-    async def get_session_events(
-        self, session_id: str
-    ) -> list[ObservabilityEvent]:
+    async def get_session_events(self, session_id: str) -> list[ObservabilityEvent]:
         """Return all events for *session_id*, preferring disk over memory."""
         path = self._log_dir / f"{session_id}.jsonl"
         if path.exists():

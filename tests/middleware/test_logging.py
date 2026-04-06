@@ -60,9 +60,7 @@ async def test_after_model_logs_tool_calls(
 
 
 @pytest.mark.asyncio
-async def test_timing_is_recorded(
-    middleware: LoggingMiddleware, sample_state: AgentState
-) -> None:
+async def test_timing_is_recorded(middleware: LoggingMiddleware, sample_state: AgentState) -> None:
     """The middleware should record a start time in before_model."""
     assert middleware._call_start == 0.0
     await middleware.before_model(sample_state)

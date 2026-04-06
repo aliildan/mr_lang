@@ -26,16 +26,18 @@ def list_plugins() -> None:
     table.add_column("Name", style="cyan")
     table.add_column("Version")
     table.add_column("Description")
-    table.add_column("Tools Module")
-    table.add_column("Workspace")
+    table.add_column("Telegram")
+    table.add_column("Memory")
+    table.add_column("RAG")
 
     for m in manifests:
         table.add_row(
             m.name,
             m.version,
             m.description[:60] if m.description else "",
-            m.tools_module or "",
-            str(m.workspace_dir) if m.workspace_dir else "",
+            "yes" if m.telegram else "",
+            "yes" if m.memory else "",
+            m.rag.backend if m.rag else "",
         )
     console.print(table)
 

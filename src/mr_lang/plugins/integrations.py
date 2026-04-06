@@ -14,6 +14,7 @@ logger = logging.getLogger(__name__)
 async def load_plugins_into_registries(
     tool_registry: ToolRegistry,
     skill_registry: SkillRegistry,
+    manifests: list[PluginManifest] | None = None,
 ) -> None:
     """Discover and activate all plugins, including their external MCP tools.
 
@@ -25,7 +26,8 @@ async def load_plugins_into_registries(
 
     Errors are logged as warnings — a broken plugin won't crash the system.
     """
-    manifests = PluginLoader.discover_plugins()
+    if manifests is None:
+        manifests = PluginLoader.discover_plugins()
 
     for manifest in manifests:
         logger.info("Activating plugin: %s v%s", manifest.name, manifest.version)

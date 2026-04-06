@@ -25,4 +25,7 @@ def build_system_prompt(workspace: WorkspaceDefinition) -> str:
     if workspace.tools_doc:
         sections.append(f"# Available Tools\n\n{workspace.tools_doc}")
 
+    if workspace.agents_doc:
+        sections.append(f"# Agents\n\n{workspace.agents_doc}")
+
     return "\n\n---\n\n".join(sections)

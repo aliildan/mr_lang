@@ -1,76 +1,35 @@
-"""Interactive chat REPL."""
+"""Interactive chat REPL with token-level streaming."""
 
 from __future__ import annotations
+
+import sys
 
 from rich.console import Console
 from rich.markdown import Markdown
 
-from mr_lang.config import MrLangConfig
-from mr_lang.core.graph import build_agent_graph
-from mr_lang.core.registry import ToolRegistry
-from mr_lang.core.runner import AgentRunner
-from mr_lang.middleware.logging_mw import LoggingMiddleware
-from mr_lang.observability.collector import EventCollector
-from mr_lang.observability.middleware import ObservabilityMiddleware
-from mr_lang.providers.base import get_chat_model
-from mr_lang.tools.builtin import list_files, read_file, run_shell, write_file
-from mr_lang.workspace.builder import build_system_prompt
-from mr_lang.workspace.loader import load_workspace
+from mr_lang.cli.setup import setup_agent
+from mr_lang.exceptions import MrLangError
 
 console = Console(stderr=True)
 
 
 async def run_chat(
     workspace: str | None = None,
-    provider: str = "ollama",
-    model: str = "llama3",
+    provider: str | None = None,
+    model: str | None = None,
+    plugin: str | None = None,
+    stream: bool = True,
 ) -> None:
     """Run the interactive chat loop."""
-    config = MrLangConfig()
-
-    # Load workspace if provided
-    system_prompt = "You are a helpful assistant."
-    if workspace:
-        ws = load_workspace(workspace)
-        system_prompt = build_system_prompt(ws)
-        console.print(f"[green]Loaded workspace:[/green] {workspace}")
-
-    # Set up model
-    provider = provider or config.default_provider
-    model = model or config.default_model
-    model_kwargs: dict = {}
-    if provider == "ollama" and config.ollama_base_url:
-        model_kwargs["base_url"] = config.ollama_base_url
-    chat_model = get_chat_model(provider, model, **model_kwargs)
-    console.print(f"[green]Model:[/green] {provider}/{model}")
-
-    # Set up tools
-    registry = ToolRegistry()
-    builtin_tools = [read_file, write_file, list_files, run_shell]
-    for t in builtin_tools:
-        registry.register(t)
-
-    # Discover and activate plugins (tools, skills, MCP servers)
-    from mr_lang.core.registry import SkillRegistry
-    from mr_lang.plugins.integrations import load_plugins_into_registries
-
-    skill_registry = SkillRegistry()
-    await load_plugins_into_registries(registry, skill_registry)
-    if registry.names():
-        console.print(f"[green]Tools:[/green] {', '.join(registry.names())}")
-
-    # Build graph with middleware
     thread_id = "cli-session"
-    collector = EventCollector()
-    obs_mw = ObservabilityMiddleware(collector=collector, session_id=thread_id)
-    middleware = [LoggingMiddleware(), obs_mw]
-    graph = build_agent_graph(
-        model=chat_model,
-        tools=registry.list(),
-        system_prompt=system_prompt,
-        middleware=middleware,
+
+    components = await setup_agent(
+        workspace=workspace,
+        provider=provider,
+        model=model,
+        plugin_name=plugin,
     )
-    runner = AgentRunner(graph)
+    runner = components.runner
     console.print("[dim]Type 'quit' or 'exit' to end. 'clear' to reset.[/dim]\n")
 
     while True:
@@ -91,13 +50,28 @@ async def run_chat(
             continue
 
         try:
-            result = await runner.run(message=user_input, thread_id=thread_id)
-            messages = result.get("messages", [])
-            if messages:
-                last = messages[-1]
-                content = last.content if hasattr(last, "content") else str(last)
+            if stream:
                 console.print()
-                console.print(Markdown(content))
-                console.print()
-        except Exception as e:
+                full_response = ""
+                async for token in runner.stream_tokens(message=user_input, thread_id=thread_id):
+                    sys.stderr.write(token)
+                    sys.stderr.flush()
+                    full_response += token
+                if full_response:
+                    sys.stderr.write("\n\n")
+                    sys.stderr.flush()
+                else:
+                    console.print("[dim]No response.[/dim]")
+            else:
+                result = await runner.run(message=user_input, thread_id=thread_id)
+                messages = result.get("messages", [])
+                if messages:
+                    last = messages[-1]
+                    content = last.content if hasattr(last, "content") else str(last)
+                    console.print()
+                    console.print(Markdown(content))
+                    console.print()
+        except MrLangError as e:
             console.print(f"[red]Error:[/red] {e}")
+        except Exception as e:
+            console.print(f"[red]Unexpected error:[/red] {e}")

@@ -44,14 +44,11 @@ class RateLimitMiddleware(BaseMiddleware):
 
         if self._tokens < 1.0:
             raise RateLimitExceededError(
-                f"Rate limit exceeded: {self._max_calls} calls/min. "
-                "Please wait before retrying."
+                f"Rate limit exceeded: {self._max_calls} calls/min. Please wait before retrying."
             )
 
         self._tokens -= 1.0
         return state
 
-    async def after_model(
-        self, state: AgentState, response: BaseMessage
-    ) -> BaseMessage:
+    async def after_model(self, state: AgentState, response: BaseMessage) -> BaseMessage:
         return response

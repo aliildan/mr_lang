@@ -65,16 +65,12 @@ class SummarizationMiddleware(BaseMiddleware):
             ]
         )
 
-        summary_msg = SystemMessage(
-            content=f"[Conversation summary]\n{summary_response.content}"
-        )
+        summary_msg = SystemMessage(content=f"[Conversation summary]\n{summary_response.content}")
 
         return {
             **state,
             "messages": [summary_msg, *recent_messages],
         }
 
-    async def after_model(
-        self, state: AgentState, response: BaseMessage
-    ) -> BaseMessage:
+    async def after_model(self, state: AgentState, response: BaseMessage) -> BaseMessage:
         return response

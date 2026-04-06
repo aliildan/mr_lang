@@ -27,9 +27,7 @@ class LoggingMiddleware(BaseMiddleware):
         )
         return state
 
-    async def after_model(
-        self, state: AgentState, response: BaseMessage
-    ) -> BaseMessage:
+    async def after_model(self, state: AgentState, response: BaseMessage) -> BaseMessage:
         elapsed = time.monotonic() - self._call_start
         parts: list[str] = [f"elapsed={elapsed:.2f}s"]
 
@@ -37,8 +35,7 @@ class LoggingMiddleware(BaseMiddleware):
         usage = getattr(response, "usage_metadata", None)
         if usage:
             parts.append(
-                f"tokens(in={usage.get('input_tokens', '?')} "
-                f"out={usage.get('output_tokens', '?')})"
+                f"tokens(in={usage.get('input_tokens', '?')} out={usage.get('output_tokens', '?')})"
             )
 
         # Tool calls
