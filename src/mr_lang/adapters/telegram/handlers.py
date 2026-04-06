@@ -2,11 +2,16 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+import asyncio
+import contextlib
+import os
+from collections.abc import Coroutine
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 from rich.console import Console
 from telegram import Update
-from telegram.constants import ParseMode
+from telegram.constants import ChatAction, ParseMode
 from telegram.ext import ContextTypes
 
 if TYPE_CHECKING:
@@ -18,6 +23,32 @@ if TYPE_CHECKING:
 console = Console(stderr=True)
 
 BOT_NAME = "mr-lang"
+
+
+async def _run_with_typing(
+    bot: Any,
+    chat_id: int,
+    coro: Coroutine,
+) -> Any:
+    """Run a coroutine while continuously sending the typing indicator.
+
+    Telegram's typing action expires after ~5 seconds, so we re-send it
+    every 4 seconds until the coroutine finishes.
+    """
+
+    async def _keep_typing() -> None:
+        while True:
+            with contextlib.suppress(Exception):
+                await bot.send_chat_action(chat_id=chat_id, action=ChatAction.TYPING)
+            await asyncio.sleep(4)
+
+    typing_task = asyncio.create_task(_keep_typing())
+    try:
+        return await coro
+    finally:
+        typing_task.cancel()
+
+
 TELEGRAM_MAX_MESSAGE_LENGTH = 4096
 
 HELP_TEXT = (
@@ -325,7 +356,9 @@ def make_text_handler(  # noqa: ANN201
         )
 
         try:
-            result = await runner.run(message=text, thread_id=thread_id)
+            result = await _run_with_typing(
+                context.bot, chat_id, runner.run(message=text, thread_id=thread_id)
+            )
             messages = result.get("messages", [])
             if messages:
                 last = messages[-1]
@@ -344,10 +377,17 @@ def make_text_handler(  # noqa: ANN201
     return text_message
 
 
+def _inbox_dir() -> Path:
+    """Return (and create) the inbox directory for uploaded files."""
+    base = Path(os.environ.get("MR_LANG_INBOX_DIR", Path.home() / ".local/share/mr-lang/inbox"))
+    base.mkdir(parents=True, exist_ok=True)
+    return base
+
+
 def make_photo_handler(  # noqa: ANN201
     runner: AgentRunner, sessions: SessionManager, guard: AuthGuard
 ):
-    """Return a handler for photo messages."""
+    """Return a handler for photo messages — downloads image, passes path to agent."""
 
     async def photo_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         chat_id, user_id = _get_ids(update)
@@ -358,29 +398,38 @@ def make_photo_handler(  # noqa: ANN201
         thread_id = sessions.get_thread_id(chat_id, user_id)
         caption = update.message.caption or ""  # type: ignore[union-attr]
 
+        # Download highest-resolution version
+        photo = update.message.photo[-1]  # type: ignore[union-attr]
+        tg_file = await context.bot.get_file(photo.file_id)
+        dest = _inbox_dir() / f"{photo.file_id}.jpg"
+        await tg_file.download_to_drive(str(dest))
+
         console.print(
             f"[cyan]Photo[/cyan] chat={chat_id} user={user_id} "
-            f"thread={thread_id} caption={caption[:40]}"
+            f"thread={thread_id} saved={dest} caption={caption[:40]}"
         )
 
-        photo = update.message.photo[-1]  # type: ignore[union-attr]
-        photo_file = await context.bot.get_file(photo.file_id)
-        file_path = photo_file.file_path
-
-        message = (
-            f"[The user sent a photo (file: {file_path}). "
-            "Full vision support is not yet available, but the photo was received.]"
-        )
+        message = f"The user sent a photo. It has been saved to: {dest}"
         if caption:
             message += f"\nCaption: {caption}"
+        message += (
+            "\nPlease OCR the image, analyze its content, and decide whether it is "
+            "worth remembering. If yes, store it using remember_fact or add_to_knowledge."
+        )
 
         try:
-            result = await runner.run(message=message, thread_id=thread_id)
+            result = await _run_with_typing(
+                context.bot, chat_id, runner.run(message=message, thread_id=thread_id)
+            )
             messages = result.get("messages", [])
             if messages:
                 last = messages[-1]
                 content = last.content if hasattr(last, "content") else str(last)
                 await _reply_markdown(update, content)
+            else:
+                await update.message.reply_text(  # type: ignore[union-attr]
+                    "Photo received and processed."
+                )
         except Exception as exc:
             console.print(f"[red]Error handling photo:[/red] {exc}")
             await update.message.reply_text(  # type: ignore[union-attr]
@@ -388,3 +437,70 @@ def make_photo_handler(  # noqa: ANN201
             )
 
     return photo_message
+
+
+def make_document_handler(  # noqa: ANN201
+    runner: AgentRunner, sessions: SessionManager, guard: AuthGuard
+):
+    """Return a handler for document messages (PDF and other files)."""
+
+    async def document_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        chat_id, user_id = _get_ids(update)
+        if not guard.is_authorized(user_id):
+            await update.message.reply_text(UNAUTHORIZED_TEXT)  # type: ignore[union-attr]
+            return
+
+        doc = update.message.document  # type: ignore[union-attr]
+        mime = doc.mime_type or ""
+        caption = update.message.caption or ""  # type: ignore[union-attr]
+
+        # Determine file extension
+        ext = Path(doc.file_name or "file").suffix or (".pdf" if "pdf" in mime else ".bin")
+        tg_file = await context.bot.get_file(doc.file_id)
+        dest = _inbox_dir() / f"{doc.file_id}{ext}"
+        await tg_file.download_to_drive(str(dest))
+
+        thread_id = sessions.get_thread_id(chat_id, user_id)
+        console.print(
+            f"[cyan]Document[/cyan] chat={chat_id} user={user_id} "
+            f"thread={thread_id} saved={dest} mime={mime}"
+        )
+
+        if "pdf" in mime:
+            message = (
+                f"The user sent a PDF document saved to: {dest}\n"
+                "Please extract its text using run_shell with: "
+                f"python3 -c \"import fitz; doc=fitz.open('{dest}'); "
+                "print('\\n'.join(p.get_text() for p in doc))\"\n"
+                "Then analyze the content and store anything worth remembering "
+                "using remember_fact or add_to_knowledge."
+            )
+        else:
+            message = (
+                f"The user sent a file saved to: {dest} (type: {mime or 'unknown'})\n"
+                "Please read and analyze the file content using read_file, "
+                "then store anything worth remembering."
+            )
+        if caption:
+            message += f"\nCaption: {caption}"
+
+        try:
+            result = await _run_with_typing(
+                context.bot, chat_id, runner.run(message=message, thread_id=thread_id)
+            )
+            messages = result.get("messages", [])
+            if messages:
+                last = messages[-1]
+                content = last.content if hasattr(last, "content") else str(last)
+                await _reply_markdown(update, content)
+            else:
+                await update.message.reply_text(  # type: ignore[union-attr]
+                    "Document received and processed."
+                )
+        except Exception as exc:
+            console.print(f"[red]Error handling document:[/red] {exc}")
+            await update.message.reply_text(  # type: ignore[union-attr]
+                "Sorry, something went wrong while processing your document."
+            )
+
+    return document_message

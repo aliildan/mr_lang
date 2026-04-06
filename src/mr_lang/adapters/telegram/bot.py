@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import logging
 from typing import TYPE_CHECKING
 
 from rich.console import Console
@@ -13,6 +14,7 @@ from mr_lang.adapters.telegram.auth import AuthConfig, AuthGuard
 from mr_lang.adapters.telegram.handlers import (
     make_allow_handler,
     make_clear_handler,
+    make_document_handler,
     make_help_handler,
     make_invite_handler,
     make_photo_handler,
@@ -32,6 +34,7 @@ if TYPE_CHECKING:
     from mr_lang.skills.schema import SkillDefinition
 
 console = Console(stderr=True)
+logger = logging.getLogger(__name__)
 
 
 class TelegramBot:
@@ -52,6 +55,7 @@ class TelegramBot:
         self.guard = AuthGuard(config=auth_config or AuthConfig())
         self.skills = skills or []
         self._app: Application | None = None
+        self._stop_event: asyncio.Event | None = None
 
     def _build_application(self) -> Application:
         """Build and configure the telegram Application."""
@@ -86,6 +90,19 @@ class TelegramBot:
                 make_photo_handler(self.runner, self.sessions, self.guard),
             )
         )
+        app.add_handler(
+            MessageHandler(
+                filters.Document.ALL,
+                make_document_handler(self.runner, self.sessions, self.guard),
+            )
+        )
+
+        # Log any unhandled handler exceptions so they appear in journald
+        async def _error_handler(update: object, context: object) -> None:
+            exc = getattr(context, "error", None)
+            logger.error("Telegram handler error (update=%s): %s", update, exc, exc_info=exc)
+
+        app.add_error_handler(_error_handler)
 
         return app
 
@@ -135,15 +152,17 @@ class TelegramBot:
                 drop_pending_updates=True,
             )
 
-            # Block until stop() is called or a signal is received
-            stop_event = asyncio.Event()
+            # Block until stop() sets the event or the task is cancelled
+            self._stop_event = asyncio.Event()
             with contextlib.suppress(asyncio.CancelledError):
-                await stop_event.wait()
+                await self._stop_event.wait()
         except Exception as exc:
             raise AdapterError(f"Telegram bot failed: {exc}") from exc
 
     async def stop(self) -> None:
         """Gracefully shut down the bot."""
+        if self._stop_event is not None:
+            self._stop_event.set()
         if self._app is not None:
             console.print("[yellow]Stopping Telegram bot...[/yellow]")
             if self._app.updater and self._app.updater.running:
