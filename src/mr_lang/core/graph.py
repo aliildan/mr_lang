@@ -59,6 +59,8 @@ def build_agent_graph(
 
     async def tools_with_hooks(state: AgentState) -> dict:
         """Wrap ToolNode to emit middleware hooks around each tool call."""
+        from langchain_core.messages import ToolMessage
+
         last_msg = state["messages"][-1]
         tool_calls = getattr(last_msg, "tool_calls", []) or []
         for tc in tool_calls:
@@ -67,9 +69,16 @@ def build_agent_graph(
 
         result = await tool_node.ainvoke(state)  # type: ignore[union-attr]
 
+        # Build a lookup from tool_call_id -> result content for after_tool hooks
+        result_by_id: dict[str, str] = {}
+        for msg in result.get("messages", []):
+            if isinstance(msg, ToolMessage):
+                result_by_id[msg.tool_call_id] = msg.content
+
         for tc in tool_calls:
+            tool_result = result_by_id.get(tc.get("id", ""), None)
             for mw in mw_chain:
-                await mw.after_tool(tc["name"], tc.get("args", {}), None)
+                await mw.after_tool(tc["name"], tc.get("args", {}), tool_result)
 
         return result
 

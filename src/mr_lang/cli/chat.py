@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+from datetime import datetime
 
 from rich.console import Console
 from rich.markdown import Markdown
@@ -12,6 +13,8 @@ from mr_lang.exceptions import MrLangError
 
 console = Console(stderr=True)
 
+_RESUME_SESSION_ID = "cli-session"
+
 
 async def run_chat(
     workspace: str | None = None,
@@ -19,15 +22,26 @@ async def run_chat(
     model: str | None = None,
     plugin: str | None = None,
     stream: bool = True,
+    verbose: bool = False,
+    resume: bool = False,
+    session_id: str | None = None,
 ) -> None:
     """Run the interactive chat loop."""
-    thread_id = "cli-session"
+    if session_id:
+        thread_id = session_id
+    elif resume:
+        thread_id = _RESUME_SESSION_ID
+    else:
+        thread_id = f"cli-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+
+    console.print(f"[dim]Session: {thread_id}[/dim]")
 
     components = await setup_agent(
         workspace=workspace,
         provider=provider,
         model=model,
         plugin_name=plugin,
+        verbose=verbose,
     )
     runner = components.runner
     console.print("[dim]Type 'quit' or 'exit' to end. 'clear' to reset.[/dim]\n")

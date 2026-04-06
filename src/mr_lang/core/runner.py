@@ -12,6 +12,8 @@ from langgraph.graph.state import CompiledStateGraph
 if TYPE_CHECKING:
     from mr_lang.middleware.base import BaseMiddleware
 
+_DEFAULT_RECURSION_LIMIT = 50
+
 
 class AgentRunner:
     """Run and stream agent conversations."""
@@ -20,9 +22,11 @@ class AgentRunner:
         self,
         graph: CompiledStateGraph,
         middleware: list[BaseMiddleware] | None = None,
+        recursion_limit: int = _DEFAULT_RECURSION_LIMIT,
     ) -> None:
         self.graph = graph
         self._middleware = middleware or []
+        self._recursion_limit = recursion_limit
 
     async def run(
         self,
@@ -32,7 +36,11 @@ class AgentRunner:
     ) -> dict:
         """Run the agent synchronously and return the final state."""
         thread_id = thread_id or str(uuid4())
-        config = {"configurable": {"thread_id": thread_id}, **kwargs}
+        config = {
+            "configurable": {"thread_id": thread_id},
+            "recursion_limit": self._recursion_limit,
+            **kwargs,
+        }
 
         for mw in self._middleware:
             await mw.before_run(message, thread_id)
@@ -61,7 +69,11 @@ class AgentRunner:
     ) -> AsyncIterator:
         """Stream agent execution (chunk-level)."""
         thread_id = thread_id or str(uuid4())
-        config = {"configurable": {"thread_id": thread_id}, **kwargs}
+        config = {
+            "configurable": {"thread_id": thread_id},
+            "recursion_limit": self._recursion_limit,
+            **kwargs,
+        }
         async for chunk in self.graph.astream(
             {"messages": [HumanMessage(content=message)]},
             config=config,
@@ -81,7 +93,11 @@ class AgentRunner:
         enabling real-time output in CLI and adapters.
         """
         thread_id = thread_id or str(uuid4())
-        config = {"configurable": {"thread_id": thread_id}, **kwargs}
+        config = {
+            "configurable": {"thread_id": thread_id},
+            "recursion_limit": self._recursion_limit,
+            **kwargs,
+        }
         async for event in self.graph.astream_events(
             {"messages": [HumanMessage(content=message)]},
             config=config,

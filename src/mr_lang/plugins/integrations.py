@@ -53,8 +53,14 @@ async def _load_mcp_tools_for_plugin(
         )
         return
 
-    for server_url in manifest.mcp_servers:
-        tools = await load_mcp_tools(server_url)
+    for server in manifest.mcp_servers:
+        # For stdio servers, default cwd to the plugin's base directory so that
+        # relative paths in args (e.g. --output-dir .mr_lang/logs/playwright)
+        # resolve from the plugin directory rather than the process cwd.
+        if not isinstance(server, str) and server.command and server.cwd is None:
+            server = server.model_copy(update={"cwd": str(manifest.base_path)})
+        server_label = server if isinstance(server, str) else server.name
+        tools = await load_mcp_tools(server)
         for tool in tools:
             try:
                 tool_registry.register(tool)
@@ -63,6 +69,6 @@ async def _load_mcp_tools_for_plugin(
                     "Plugin '%s': skipping MCP tool '%s' from %s: %s",
                     manifest.name,
                     tool.name,
-                    server_url,
+                    server_label,
                     exc,
                 )

@@ -41,13 +41,32 @@ def chat(
     plugin: str = typer.Option(
         None, "--plugin", help="Plugin name (isolates to this plugin's context)"
     ),
+    verbose: bool = typer.Option(
+        False, "--verbose", help="Show tool call arguments and result previews"
+    ),
+    resume: bool = typer.Option(
+        False, "--resume", help="Resume the last session instead of starting a new one"
+    ),
+    session_id: str = typer.Option(
+        None, "--session-id", help="Use a specific session ID (implies --resume)"
+    ),
 ) -> None:
     """Start an interactive chat session with an agent."""
     import asyncio
 
     from mr_lang.cli.chat import run_chat
 
-    asyncio.run(run_chat(workspace=workspace, provider=provider, model=model, plugin=plugin))
+    asyncio.run(
+        run_chat(
+            workspace=workspace,
+            provider=provider,
+            model=model,
+            plugin=plugin,
+            verbose=verbose,
+            resume=resume,
+            session_id=session_id,
+        )
+    )
 
 
 @app.command()

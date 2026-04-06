@@ -79,6 +79,7 @@ async def setup_agent(
     extra_middleware: list[BaseMiddleware] | None = None,
     load_plugins: bool = True,
     plugin_name: str | None = None,
+    verbose: bool = False,
 ) -> AgentComponents:
     """Wire up workspace, model, tools, plugins, and graph into an AgentRunner.
 
@@ -246,7 +247,7 @@ async def setup_agent(
     # Build graph with middleware (observability is always on)
     collector = EventCollector()
     obs_mw = ObservabilityMiddleware(collector=collector, session_id="default")
-    middleware: list[BaseMiddleware] = [LoggingMiddleware(), obs_mw]
+    middleware: list[BaseMiddleware] = [LoggingMiddleware(verbose=verbose), obs_mw]
     if extra_middleware:
         middleware.extend(extra_middleware)
     graph = build_agent_graph(
@@ -257,7 +258,7 @@ async def setup_agent(
         store=store,
         middleware=middleware,
     )
-    runner = AgentRunner(graph, middleware=middleware)
+    runner = AgentRunner(graph, middleware=middleware, recursion_limit=config.agent_recursion_limit)
 
     return AgentComponents(
         runner=runner,

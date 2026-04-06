@@ -98,8 +98,17 @@ class PluginLoader:
         data["skills_dir"] = paths.get("skills")
         data["tools_module"] = paths.get("tools_module")
 
+        from mr_lang.plugins.schema import McpServerConfig
+
         mcp = plugin_section.get("mcp", {})
-        data["mcp_servers"] = mcp.get("servers", [])
+        raw_servers = mcp.get("servers", [])
+        parsed_servers: list = []
+        for s in raw_servers:
+            if isinstance(s, str):
+                parsed_servers.append(s)
+            elif isinstance(s, dict):
+                parsed_servers.append(McpServerConfig(**s))
+        data["mcp_servers"] = parsed_servers
 
         cli = plugin_section.get("cli", {})
         data["cli_module"] = cli.get("module")
@@ -287,9 +296,7 @@ class PluginLoader:
                 if isinstance(m, PluginManifest):
                     manifests.append(m)
                 else:
-                    logger.warning(
-                        "Entry point %s did not return a PluginManifest", ep.name
-                    )
+                    logger.warning("Entry point %s did not return a PluginManifest", ep.name)
             except Exception as exc:
                 logger.warning("Failed to load plugin entry point %s: %s", ep.name, exc)
         return manifests

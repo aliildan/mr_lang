@@ -98,6 +98,12 @@ class MrLangConfig(BaseSettings):
         """Parse comma-separated blocked command patterns."""
         return [x.strip() for x in self.tools_blocked_commands.split(",") if x.strip()]
 
+    # Agent execution
+    agent_recursion_limit: int = Field(
+        default=50,
+        description="LangGraph recursion limit — max steps per agent turn (default: 50)",
+    )
+
     # Logging
     log_level: str = Field(default="INFO")
 

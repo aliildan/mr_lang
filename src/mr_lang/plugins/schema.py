@@ -40,6 +40,22 @@ class RagConfig(BaseModel):
     chunk_overlap: int = Field(default=200, description="Overlap between chunks")
 
 
+class McpServerConfig(BaseModel):
+    """Configuration for a single MCP server (URL-based or stdio process)."""
+
+    name: str = Field(..., description="Unique name for this server")
+    # URL-based (SSE) transport
+    url: str | None = Field(default=None, description="SSE server URL (e.g. http://host/sse)")
+    # stdio (subprocess) transport
+    command: str | None = Field(default=None, description="Command to launch the MCP server")
+    args: list[str] = Field(default_factory=list, description="Arguments for the command")
+    env: dict[str, str] = Field(default_factory=dict, description="Extra env vars for the process")
+    cwd: str | None = Field(
+        default=None,
+        description="Working directory for the subprocess. Defaults to the plugin's base path.",
+    )
+
+
 class PluginManifest(BaseModel):
     """Describes a mr_lang plugin and its capabilities."""
 
@@ -60,9 +76,9 @@ class PluginManifest(BaseModel):
         description="Python module path for tools (e.g., 'herr_molly.tools')",
     )
 
-    # MCP servers
-    mcp_servers: list[str] = Field(
-        default_factory=list, description="MCP server URLs to connect to"
+    # MCP servers — each entry is either a URL string (legacy) or a McpServerConfig
+    mcp_servers: list[str | McpServerConfig] = Field(
+        default_factory=list, description="MCP servers: URL strings or server config objects"
     )
 
     # CLI extension
